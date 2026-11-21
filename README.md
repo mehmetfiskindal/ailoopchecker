@@ -50,10 +50,15 @@ console.log(report.verdict, report.aiScore)
 ### Native `geatsc` ikili dosyasını derleme
 
 ```bash
-npm run build
+npm install        # devDependencies: @geastack/compiler, @geastack/node-compat, typescript
+npm run build      # optimizasyonsuz derleme için: npm run build:debug
 ```
 
-Bu komut `geatsc` ile `src/cli.ts` kaynağını C++'a derler ve `./dist/ailoopchecker` native çalıştırılabilir dosyasını üretir.
+Bu komut `geatsc` ile `src/cli.ts` kaynağını C++'a derler ve `./dist/ailoopchecker` native çalıştırılabilir dosyasını üretir. `clang++` veya `g++` gereklidir (farklı bir derleyici için `CXX` ortam değişkenini ayarlayın). Proje içinde `@geastack/node-compat` yoksa global `@geastack/cli` (`gea`) kurulumundaki kopya kullanılır.
+
+npm dağıtımı (`lib/` içindeki JS + `.d.ts`) için `npm run build:npm` kullanılır; `npm publish` bunu `prepublishOnly` ile otomatik çalıştırır. Sürüm numarası `package.json` ve `src/shared/version.ts` içinde aynı olmalıdır, aksi halde build durur.
+
+Bir dizin verildiğinde `node_modules`, `dist`, `build`, `target`, `vendor`, `coverage` gibi çıktı/bağımlılık klasörleri hem git hem git dışı modda atlanır; `lib/` ve `src/` gibi kaynak klasörleri taranır.
 
 ### Kullanım
 

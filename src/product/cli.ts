@@ -10,12 +10,12 @@ import {
   formatReportText
 } from './report.ts'
 import { runSelfTests } from './selftest.ts'
+import { VERSION } from '../shared/version.ts'
 
 // Ensure node-compat's global URL provider is included for node:fs signatures
 const _keepUrlGlobal: typeof URL | undefined = typeof URL !== 'undefined' ? URL : undefined
 void _keepUrlGlobal
 
-const VERSION = '1.0.0'
 
 function printHelp(lang: OutputLang): void {
   if (lang === 'en') {
@@ -33,7 +33,7 @@ Supported media:
 
 Options:
   -p, --project       Aggregate files into a Project-Level AI-Loop audit report
-  --file-list <file>  Read newline-delimited project file paths from a manifest file
+  --file-list <file>  Read project file paths from a manifest (newline- or NUL-delimited)
   --json              Emit machine-readable JSON output
   -v, --verbose       Show full forensic evidence, metadata, DSP metrics, and SHA-256
   --strict            Exit with code 2 if AI / AI-Loop is detected
@@ -61,7 +61,7 @@ Desteklenen medya türleri:
 
 Seçenekler:
   -p, --project       Dosyaları birleştirerek Proje Düzeyi AI-Loop denetim raporu üretir
-  --file-list <dosya> Satır bazlı dosya yolu listesinden proje tarar
+  --file-list <dosya> Satır veya NUL ile ayrılmış dosya yolu listesinden proje tarar
   --json              Makine tarafından okunabilir JSON çıktısı üretir
   -v, --verbose       Tüm adli kanıtları, metaverileri, DSP metriklerini ve SHA-256 özetini gösterir
   --strict            AI veya AI-Loop tespit edilirse çıkış kodu 2 ile döner (CI/otomasyon için)
@@ -148,10 +148,20 @@ async function main(): Promise<void> {
 
   if (opts.fileListPath.length > 0) {
     const rawList = await fsPromises.readFile(opts.fileListPath, 'utf8')
-    const lines = rawList.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      const p = lines[i]!.trim()
-      if (p.length > 0 && !p.startsWith('#')) opts.files.push(p)
+    if (rawList.indexOf('\0') !== -1) {
+      // NUL-delimited manifest (written by bin/ailoopchecker.mjs): paths are taken
+      // verbatim so names with spaces, a leading '#' or newlines survive.
+      const entries = rawList.split('\0')
+      for (let i = 0; i < entries.length; i++) {
+        if (entries[i]!.length > 0) opts.files.push(entries[i]!)
+      }
+    } else {
+      // Hand-written newline-delimited manifest: trims lines, '#' starts a comment.
+      const lines = rawList.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const p = lines[i]!.trim()
+        if (p.length > 0 && !p.startsWith('#')) opts.files.push(p)
+      }
     }
   }
 

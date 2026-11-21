@@ -2,6 +2,27 @@
 
 Bu proje [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) biçimini ve [SemVer](https://semver.org/) sürümlemeyi takip eder.
 
+## [1.0.2] - 2026-11-21
+
+### Düzeltildi
+- **Windows:** JS CLI yedeği `pathToFileURL` ile yükleniyor (`ERR_UNSUPPORTED_ESM_URL_SCHEME` hatası giderildi).
+- `--version` ve JSON raporlarındaki `"version"` alanı artık doğru sürümü gösteriyor; sürüm `src/shared/version.ts` içinde tek yerde tutuluyor ve `build:npm` `package.json` ile uyuşmazlıkta duruyor.
+- Yayınlanan `.d.ts` dosyalarındaki `./x.ts` import yolları `./x.js` olarak yeniden yazılıyor (`skipLibCheck: false` tüketicilerde tip hatası giderildi).
+- Dizin taramasında git ve git dışı mod aynı klasör filtresini kullanıyor; `lib/` artık atlanmıyor, commit'lenmiş `vendor/`/`dist/` artık taranmıyor.
+- `--project-name`, `--lang`, `--threshold`, `--file-list` değerleri artık yanlışlıkla taranacak dizin olarak algılanmıyor.
+- Dizin ile birlikte verilen `--file-list` artık sessizce yok sayılmıyor; listeler birleştiriliyor.
+- Geçici dosya listesi `mkdtemp` ile özel bir dizinde, NUL ayraçlı olarak oluşturuluyor (`#` ile başlayan veya boşluk içeren dosya adları kaybolmuyor).
+- Build script'leri `which`/kabuk kullanmadan platformdan bağımsız araç buluyor ve başlatma hatalarını yazdırıyor.
+
+### Değişti
+- `@geastack/compiler`, `@geastack/node-compat` ve `typescript` devDependency olarak eklendi.
+- `prepublishOnly` self-test'i derlenmiş `lib/cli.js` üzerinden çalıştırıyor (Node 22.15'te tip temizleme bayrağı gerekmiyor).
+
+## [1.0.1] - 2026-11-21
+
+### Eklendi
+- npm dağıtımı: derlenmiş `lib/` (JS + `.d.ts`), `#!/usr/bin/env node` içeren `bin/ailoopchecker.mjs` ve doğrudan dizin tarama desteği.
+
 ## [1.0.0] - 2026-11-21
 
 ### Eklendi

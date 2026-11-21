@@ -6,6 +6,7 @@ import type {
   ProjectVerdict,
   Verdict
 } from '../shared/types.ts'
+import { VERSION } from '../shared/version.ts'
 
 interface AnsiPalette {
   reset: string
@@ -291,7 +292,7 @@ export function formatReportsJson(reports: AnalysisReport[]): string {
   return (
     `{\n` +
     `  "tool": "ailoopchecker",\n` +
-    `  "version": "1.0.0",\n` +
+    `  "version": ${jsonString(VERSION)},\n` +
     `  "count": ${reports.length},\n` +
     `  "reports": ${reportsJson}\n` +
     `}`
@@ -454,7 +455,7 @@ export function formatProjectReportJson(project: ProjectAuditReport): string {
   return (
     `{\n` +
     `  "tool": "ailoopchecker",\n` +
-    `  "version": "1.0.0",\n` +
+    `  "version": ${jsonString(VERSION)},\n` +
     `  "mode": "project",\n` +
     `  "projectName": ${jsonString(project.projectName)},\n` +
     `  "totalFiles": ${project.totalFiles},\n` +

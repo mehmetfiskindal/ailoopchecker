@@ -11,6 +11,7 @@ src/
 ├── shared/                      # Katman 1: Alandan bağımsız temel tipler ve ikili/sıkıştırma yardımcıları
 │   ├── types.ts                 # Ortak veri sözleşmeleri (MediaCategory, Verdict, ProjectAuditReport, CliOptions)
 │   ├── bytes.ts                 # Endian-güvenli okuyucular, magic-byte tespiti, O(N) bayt-düzeyi UTF-8 CI arama
+│   ├── version.ts               # Tek sürüm kaynağı (build:npm package.json ile eşleştiğini doğrular)
 │   └── inflate.ts               # Saf TypeScript RFC 1950/1951 zlib inflate (libbrotlidec bağımlılığı yok)
 │
 ├── core/                        # Katman 2: Çekirdek adli motor ve proje AI-Loop orkestrasyonu
