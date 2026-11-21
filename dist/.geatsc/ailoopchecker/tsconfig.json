@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "noImplicitAny": true,
+    "resolveJsonModule": false,
+    "noEmit": true,
+    "customConditions": [
+      "node"
+    ],
+    "skipLibCheck": true,
+    "types": [],
+    "paths": {
+      "node:buffer": [
+        "/home/mehmetfiskindal/node_modules/@geastack/node-compat/runtime/node/buffer.ts"
+      ],
+      "node:crypto": [
+        "/home/mehmetfiskindal/node_modules/@geastack/node-compat/runtime/node/crypto.ts"
+      ],
+      "node:fs": [
+        "/home/mehmetfiskindal/node_modules/@geastack/node-compat/runtime/node/fs.ts"
+      ],
+      "node:path": [
+        "/home/mehmetfiskindal/node_modules/@geastack/node-compat/runtime/node/path.ts"
+      ],
+      "node:process": [
+        "/home/mehmetfiskindal/node_modules/@geastack/node-compat/runtime/node/process.ts"
+      ]
+    }
+  },
+  "files": [
+    "./../../../../../node_modules/typescript/lib/lib.es2022.d.ts",
+    "./../../../../../node_modules/typescript/lib/lib.es2018.asynciterable.d.ts",
+    "./../../../../../node_modules/typescript/lib/lib.es2018.asyncgenerator.d.ts",
+    "./../../../../../node_modules/typescript/lib/lib.esnext.disposable.d.ts",
+    "../../../src/cli.ts",
+    "./../../../../../node_modules/@geastack/node-compat/runtime/node/standard-library.ts",
+    "./../../../../../node_modules/@geastack/node-compat/runtime/node/node-globals.ts",
+    "./../../../../../node_modules/@geastack/node-compat/runtime/node/whatwg-streams.ts",
+    "./../../../../../node_modules/@geastack/node-compat/runtime/node/abort-events.ts",
+    "./../../../../../node_modules/@geastack/node-compat/runtime/node/global-timers.ts",
+    "./../../../../../node_modules/@geastack/node-compat/runtime/node/native-addons.ts",
+    "./../../../../../node_modules/@geastack/node-compat/runtime/node/globals.ts"
+  ]
+}
