@@ -2,6 +2,12 @@ export type MediaCategory = 'image' | 'video' | 'audio' | 'code' | 'text' | 'unk
 
 export type Verdict = 'CONFIRMED_AI' | 'LIKELY_AI' | 'INCONCLUSIVE' | 'LIKELY_AUTHENTIC'
 
+export type ProjectVerdict =
+  | 'AI_LOOP_CONFIRMED'
+  | 'AI_LOOP_LIKELY'
+  | 'MIXED_AI_ASSISTED'
+  | 'ORGANIC_PROJECT'
+
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'authentic'
 
 export type OutputLang = 'tr' | 'en'
@@ -50,8 +56,30 @@ export interface AnalysisReport {
   error: string
 }
 
+export interface ProjectAuditReport {
+  projectName: string
+  totalFiles: number
+  analyzedFiles: number
+  errorFiles: number
+  aiFiles: number
+  authenticFiles: number
+  inconclusiveFiles: number
+  aiRatioPercent: number
+  averageFileAiScore: number
+  crossFileDuplicationPercent: number
+  modalitiesWithAi: string[]
+  projectScore: number
+  confidence: number
+  projectVerdict: ProjectVerdict
+  findings: ForensicFinding[]
+  reports: AnalysisReport[]
+  elapsedMs: number
+}
+
 export interface CliOptions {
   files: string[]
+  projectMode: boolean
+  fileListPath: string
   json: boolean
   verbose: boolean
   strict: boolean

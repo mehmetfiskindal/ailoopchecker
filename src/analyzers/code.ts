@@ -151,6 +151,91 @@ const PRAGMATIC_HUMAN_MARKERS: string[] = [
   'workaround'
 ]
 
+const LLM_API_SIGNALS: string[] = [
+  'chat.completions.create',
+  'responses.create',
+  'messages.create',
+  'generatecontent(',
+  'generate_content(',
+  'openai(',
+  'anthropic(',
+  'litellm.',
+  'ollama.',
+  'langchain',
+  'langgraph',
+  'crewai',
+  'autogen',
+  'smolagents',
+  'pydantic_ai',
+  'agentexecutor',
+  'run_agent(',
+  'runagent('
+]
+
+const LOOP_CONSTRUCT_SIGNALS: string[] = [
+  'while (true)',
+  'while(true)',
+  'while true:',
+  'for (;;)',
+  'for(;;)',
+  'loop {',
+  'for {',
+  'while not done',
+  'while !done',
+  'while (running)',
+  'while running:'
+]
+
+const LOOP_GUARD_SIGNALS: string[] = [
+  'max_iterations',
+  'maxiterations',
+  'max_steps',
+  'maxsteps',
+  'max_turns',
+  'maxturns',
+  'max_retries',
+  'maxretries',
+  'budget',
+  'token_limit',
+  'tokenlimit',
+  'human_approval',
+  'human_in_the_loop',
+  'confirm('
+]
+
+const SELF_FEEDBACK_LOOP_SIGNALS: string[] = [
+  'ralph_loop',
+  'ralph-loop',
+  'auto_fix_loop',
+  'autofixloop',
+  'self_critique',
+  'selfcritique',
+  'self_improve',
+  'selfimprove',
+  'refine_prompt',
+  'refineprompt',
+  'reflect_and_retry',
+  'feedback_loop',
+  'autonomous_loop',
+  'agent_loop',
+  'agentloop',
+  'prompt_chain',
+  'prev_output',
+  'previous_output',
+  'last_response'
+]
+
+const STUB_PLACEHOLDER_PATTERNS: string[] = [
+  'not implemented',
+  'notimplementederror',
+  'todo!()',
+  'unimplemented!()',
+  'pass # todo',
+  'pass  # todo',
+  '// todo: implement',
+  '# todo: implement'
+]
+
 function extractCommentText(trimmedLine: string, profile: CodeLanguageProfile): string | null {
   if (trimmedLine.startsWith(profile.lineComment)) {
     return trimmedLine.slice(profile.lineComment.length).trim()
@@ -353,6 +438,43 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
     }
   }
 
+  // Detect AI-loop / autonomous LLM feedback loop patterns in source code
+  const matchedLlmApis: string[] = []
+  for (let i = 0; i < LLM_API_SIGNALS.length; i++) {
+    const sig = LLM_API_SIGNALS[i]!
+    if (lowerAll.indexOf(sig) >= 0) addUnique(matchedLlmApis, sig)
+  }
+
+  const matchedLoops: string[] = []
+  for (let i = 0; i < LOOP_CONSTRUCT_SIGNALS.length; i++) {
+    const sig = LOOP_CONSTRUCT_SIGNALS[i]!
+    if (lowerAll.indexOf(sig) >= 0) addUnique(matchedLoops, sig)
+  }
+
+  let hasLoopGuard = false
+  for (let i = 0; i < LOOP_GUARD_SIGNALS.length; i++) {
+    if (lowerAll.indexOf(LOOP_GUARD_SIGNALS[i]!) >= 0) {
+      hasLoopGuard = true
+      break
+    }
+  }
+
+  const matchedSelfFeedback: string[] = []
+  for (let i = 0; i < SELF_FEEDBACK_LOOP_SIGNALS.length; i++) {
+    const sig = SELF_FEEDBACK_LOOP_SIGNALS[i]!
+    if (lowerAll.indexOf(sig) >= 0) addUnique(matchedSelfFeedback, sig)
+  }
+
+  let stubCount = 0
+  for (let i = 0; i < STUB_PLACEHOLDER_PATTERNS.length; i++) {
+    const pat = STUB_PLACEHOLDER_PATTERNS[i]!
+    let idx = lowerAll.indexOf(pat)
+    while (idx >= 0) {
+      stubCount++
+      idx = lowerAll.indexOf(pat, idx + pat.length)
+    }
+  }
+
   // Count textbook JSDoc/docstring tags (@param/@returns or Args:/Returns:)
   const paramMatches = text.match(/@param\b|\bArgs:\s*$|^\s*Returns:\s*$/gm)
   const docTagCount = paramMatches ? paramMatches.length : 0
@@ -377,6 +499,61 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
   metrics.push({ key: 'code_comment_emdash_emoji', value: String(emDashInComments + emojiInComments) })
   metrics.push({ key: 'code_line_len_cv', value: String(round2(codeLineLenCv)) })
   metrics.push({ key: 'code_pragmatic_human_markers', value: String(pragmaticHumanHits + ticketRefHits) })
+  metrics.push({ key: 'code_llm_api_signals', value: String(matchedLlmApis.length) })
+  metrics.push({ key: 'code_self_feedback_signals', value: String(matchedSelfFeedback.length) })
+  metrics.push({ key: 'code_stub_placeholders', value: String(stubCount) })
+
+  if (matchedLlmApis.length > 0 && matchedLoops.length > 0) {
+    const unbounded = !hasLoopGuard
+    findings.push({
+      id: unbounded ? 'code_unbounded_llm_loop' : 'code_autonomous_llm_loop',
+      category: 'ailoop',
+      severity: unbounded ? 'high' : 'medium',
+      scoreDelta: unbounded ? 32 : 18,
+      titleTr: unbounded
+        ? 'Sınırsız otonom LLM döngüsü tespit edildi (AI-Loop)'
+        : 'Otonom LLM ajan döngüsü tespit edildi (AI-Loop)',
+      titleEn: unbounded
+        ? 'Unbounded autonomous LLM loop detected (AI-Loop)'
+        : 'Autonomous LLM agent loop detected (AI-Loop)',
+      detailTr: unbounded
+        ? 'Kaynak kodda max_iterations/budget/onay koruması olmadan sonsuz döngü içinde LLM API çağrısı yapılıyor.'
+        : 'Kaynak kodda döngü içinde yinelenen LLM API çağrısı bulunuyor.',
+      detailEn: unbounded
+        ? 'Code invokes LLM APIs inside an unbounded loop without max-iteration, budget, or human-approval guards.'
+        : 'Code executes repeated LLM API calls inside an orchestration loop.',
+      evidence: `apis=[${matchedLlmApis.slice(0, 3).join(', ')}] loops=[${matchedLoops.slice(0, 2).join(', ')}] guard=${hasLoopGuard ? 'yes' : 'no'}`
+    })
+  }
+
+  if (matchedSelfFeedback.length >= 1) {
+    const score = matchedSelfFeedback.length >= 2 ? 26 : 16
+    findings.push({
+      id: 'code_self_prompt_feedback_loop',
+      category: 'ailoop',
+      severity: matchedSelfFeedback.length >= 2 ? 'high' : 'medium',
+      scoreDelta: score,
+      titleTr: `Kendi kendini besleyen AI geri besleme döngüsü örüntüsü (${matchedSelfFeedback.length})`,
+      titleEn: `Self-feeding AI feedback loop pattern (${matchedSelfFeedback.length})`,
+      detailTr: 'Model çıktısını doğrudan tekrar modele besleyen otonom döngü/öz-düzeltme (ralph/self-critique/auto-fix loop) yapısı bulundu.',
+      detailEn: 'Contains self-feeding prompt/refinement loop patterns feeding model outputs directly back into subsequent LLM turns.',
+      evidence: matchedSelfFeedback.slice(0, 5).join(', ')
+    })
+  }
+
+  if (stubCount >= 2 && (narrationHits >= 2 || matchedOmissions.length > 0)) {
+    findings.push({
+      id: 'code_stub_proliferation',
+      category: 'ailoop',
+      severity: 'medium',
+      scoreDelta: 14,
+      titleTr: `Tamamlanmamış AI taslak/stub yığılması (${stubCount} adet)`,
+      titleEn: `Incomplete AI stub/placeholder proliferation (${stubCount} hits)`,
+      detailTr: 'Kodda anlatım yorumlarıyla birlikte birden fazla uygulanmamış taslak (NotImplemented / TODO implement) blok yer alıyor.',
+      detailEn: 'Multiple unimplemented stubs paired with AI narration or omission comments.',
+      evidence: `stubs=${stubCount}`
+    })
+  }
 
   // Forensic Scoring Rules for Source Code
   if (matchedOmissions.length > 0) {
