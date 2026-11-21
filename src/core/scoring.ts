@@ -1,5 +1,5 @@
-import type { ForensicFinding, Verdict } from './types.ts'
-import { clamp } from './bytes.ts'
+import type { ForensicFinding, Verdict } from '../shared/types.ts'
+import { clamp } from '../shared/bytes.ts'
 
 export interface ScoreEvaluation {
   aiScore: number
@@ -8,7 +8,7 @@ export interface ScoreEvaluation {
 }
 
 export function evaluateFindings(findings: ForensicFinding[], threshold: number): ScoreEvaluation {
-  let rawScore = 15 // Neutral baseline before evidence
+  let rawScore = 15
   let hasCriticalAi = false
   let positiveEvidenceCount = 0
   let authenticEvidenceCount = 0
@@ -28,8 +28,6 @@ export function evaluateFindings(findings: ForensicFinding[], threshold: number)
     }
   }
 
-  // Require corroboration when there is no explicit provenance/generator signature:
-  // a single soft heuristic should not push the score above 58 on its own.
   if (!hasCriticalAi && positiveEvidenceCount <= 1 && rawScore > 58) {
     rawScore = 58
   }
@@ -40,11 +38,9 @@ export function evaluateFindings(findings: ForensicFinding[], threshold: number)
 
   const aiScore = Math.round(clamp(rawScore, 0, 100))
 
-  // Confidence reflects how much strong evidence (either AI or authentic) we observed
   let confidence = 35 + Math.min(45, totalEvidenceMagnitude * 0.55)
   if (hasCriticalAi) confidence = Math.max(confidence, 92)
   if (positiveEvidenceCount > 0 && authenticEvidenceCount > 0 && !hasCriticalAi) {
-    // Mixed signals lower confidence
     confidence = Math.max(30, confidence - 18)
   }
   confidence = Math.round(clamp(confidence, 20, 99))

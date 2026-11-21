@@ -1,7 +1,6 @@
-import { Buffer } from 'node:buffer'
-import type { AnalyzerResult, ForensicFinding, KeyValueEntry } from '../types.ts'
-import { round2 } from '../bytes.ts'
-import { addUnique, scanTextForAiSignatures } from '../signatures.ts'
+import type { AnalyzerResult, ForensicFinding, KeyValueEntry } from '../../shared/types.ts'
+import { addUnique, indexOfUtf8CI, round2 } from '../../shared/bytes.ts'
+import { scanBytesForAiSignatures } from '../../core/signatures.ts'
 
 const AI_PHRASES_TR: string[] = [
   'günümüzün hızla değişen',
@@ -48,38 +47,130 @@ const AI_PHRASES_EN: string[] = [
   'crafted with precision'
 ]
 
+function isAsciiWs(b: number): boolean {
+  return b === 32 || b === 9 || b === 10 || b === 13
+}
+
+function isWordByte(b: number): boolean {
+  return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b >= 128
+}
+
+function countBoldBulletTemplatesBytes(buf: Uint8Array, len: number): number {
+  let count = 0
+  let i = 0
+  while (i < len) {
+    while (i < len && (buf[i] === 32 || buf[i] === 9)) i++
+    if (i < len) {
+      const b0 = buf[i]!
+      let afterMarker = -1
+      if (b0 === 45 || b0 === 42) {
+        afterMarker = i + 1
+      } else if (i + 2 < len && b0 === 0xe2 && buf[i + 1] === 0x80 && buf[i + 2] === 0xa2) {
+        afterMarker = i + 3
+      }
+      if (afterMarker > 0) {
+        let j = afterMarker
+        let ws = 0
+        while (j < len && (buf[j] === 32 || buf[j] === 9)) {
+          j++
+          ws++
+        }
+        if (ws > 0 && j + 4 < len && buf[j] === 42 && buf[j + 1] === 42) {
+          const limit = Math.min(len - 2, j + 80)
+          for (let k = j + 3; k < limit; k++) {
+            const c = buf[k]!
+            if (c === 10 || c === 13) break
+            if (c === 58 && buf[k + 1] === 42 && buf[k + 2] === 42) {
+              count++
+              break
+            }
+          }
+        }
+      }
+    }
+    while (i < len && buf[i] !== 10) i++
+    if (i < len) i++
+  }
+  return count
+}
+
 export function analyzeText(buf: Uint8Array, format: string): AnalyzerResult {
   const findings: ForensicFinding[] = []
   const metadata: KeyValueEntry[] = []
   const metrics: KeyValueEntry[] = []
   const generatorHints: string[] = []
 
-  const text = Buffer.from(buf).toString('utf8')
-  const trimmed = text.trim()
-  const lower = trimmed.toLowerCase()
+  const scanLen = Math.min(buf.length, 131072)
+  const scanSlice = buf.subarray(0, scanLen)
 
-  // Split sentences
-  const rawSentences = trimmed.split(/[.!?]+\s+|\n{2,}/)
-  const sentences: string[] = []
+  // Single-pass O(N) byte-level stylometry (zero string.toLowerCase / charCodeAt)
   const sentenceWordCounts: number[] = []
+  const uniqueWordHashes = new Set<number>()
   let totalWords = 0
-  const uniqueWords = new Set<string>()
+  let currentSentenceWords = 0
+  let emDashCount = 0
+  let inWord = false
+  let wordLen = 0
+  let wordHash = 2166136261
+  let prevNewline = false
 
-  for (let i = 0; i < rawSentences.length; i++) {
-    const s = rawSentences[i]!.trim()
-    if (s.length < 6) continue
-    const words = s.split(/\s+/).filter((w) => w.length > 0)
-    if (words.length < 3) continue
-    sentences.push(s)
-    sentenceWordCounts.push(words.length)
-    totalWords += words.length
-    for (let j = 0; j < words.length; j++) {
-      const cleaned = words[j]!.toLowerCase().replace(/[^a-z0-9çğıöşü]/g, '')
-      if (cleaned.length >= 2) uniqueWords.add(cleaned)
+  const flushWord = (): void => {
+    if (inWord) {
+      currentSentenceWords++
+      totalWords++
+      if (wordLen >= 2 && uniqueWordHashes.size < 8192) {
+        uniqueWordHashes.add(wordHash >>> 0)
+      }
+      inWord = false
+      wordLen = 0
+      wordHash = 2166136261
     }
   }
 
-  // Sentence burstiness (CV of sentence lengths)
+  const flushSentence = (): void => {
+    flushWord()
+    if (currentSentenceWords >= 3) {
+      sentenceWordCounts.push(currentSentenceWords)
+    }
+    currentSentenceWords = 0
+  }
+
+  for (let i = 0; i < scanLen; i++) {
+    const b = scanSlice[i]!
+    if (b === 0xe2 && i + 2 < scanLen && scanSlice[i + 1] === 0x80 && scanSlice[i + 2] === 0x94) {
+      flushWord()
+      emDashCount++
+      i += 2
+      prevNewline = false
+      continue
+    }
+
+    if (isWordByte(b)) {
+      const lb = b >= 65 && b <= 90 ? b + 32 : b
+      wordHash = Math.imul(wordHash ^ lb, 16777619)
+      inWord = true
+      wordLen++
+      prevNewline = false
+    } else if (isAsciiWs(b)) {
+      flushWord()
+      if (b === 10) {
+        if (prevNewline) flushSentence()
+        prevNewline = true
+      }
+    } else if (b === 46 || b === 33 || b === 63) {
+      flushWord()
+      const nextB = i + 1 < scanLen ? scanSlice[i + 1]! : 32
+      if (isAsciiWs(nextB)) flushSentence()
+      prevNewline = false
+    } else {
+      flushWord()
+      prevNewline = false
+    }
+  }
+  flushSentence()
+
+  const boldBulletCount = countBoldBulletTemplatesBytes(scanSlice, scanLen)
+
   let meanLen = 0
   let burstinessCv = 0
   if (sentenceWordCounts.length >= 3) {
@@ -95,28 +186,23 @@ export function analyzeText(buf: Uint8Array, format: string): AnalyzerResult {
     burstinessCv = meanLen > 0 ? Math.sqrt(variance) / meanLen : 0
   }
 
-  const ttr = totalWords > 0 ? uniqueWords.size / totalWords : 0
+  const ttr = totalWords > 0 ? uniqueWordHashes.size / totalWords : 0
 
-  // Count AI cliché phrases (TR + EN)
+  // O(N) direct byte-level phrase scan (zero toLowerCase on large buffers!)
+  const phraseScanLen = Math.min(buf.length, 32768)
   const matchedPhrases: string[] = []
   for (let i = 0; i < AI_PHRASES_TR.length; i++) {
     const p = AI_PHRASES_TR[i]!
-    if (lower.indexOf(p) >= 0) matchedPhrases.push(p)
+    if (indexOfUtf8CI(buf, p, 0, phraseScanLen) >= 0) matchedPhrases.push(p)
   }
   for (let i = 0; i < AI_PHRASES_EN.length; i++) {
     const p = AI_PHRASES_EN[i]!
-    if (lower.indexOf(p) >= 0) matchedPhrases.push(p)
+    if (indexOfUtf8CI(buf, p, 0, phraseScanLen) >= 0) matchedPhrases.push(p)
   }
 
-  // Structural markers: markdown bold-colon bullet lists (`- **Feature:** ...`), em-dash frequency
-  const boldBulletMatches = trimmed.match(/(?:^|\n)\s*[-*•]\s+\*\*[^*\n]{2,60}:\*\*/g)
-  const boldBulletCount = boldBulletMatches ? boldBulletMatches.length : 0
-  const emDashMatches = trimmed.match(/—/g)
-  const emDashCount = emDashMatches ? emDashMatches.length : 0
-
-  metrics.push({ key: 'text_char_count', value: String(trimmed.length) })
+  metrics.push({ key: 'text_char_count', value: String(scanLen) })
   metrics.push({ key: 'text_word_count', value: String(totalWords) })
-  metrics.push({ key: 'text_sentence_count', value: String(sentences.length) })
+  metrics.push({ key: 'text_sentence_count', value: String(sentenceWordCounts.length) })
   metrics.push({ key: 'text_avg_sentence_words', value: String(round2(meanLen)) })
   metrics.push({ key: 'text_burstiness_cv', value: String(round2(burstinessCv)) })
   metrics.push({ key: 'text_lexical_ttr', value: String(round2(ttr)) })
@@ -150,7 +236,7 @@ export function analyzeText(buf: Uint8Array, format: string): AnalyzerResult {
     })
   }
 
-  if (sentences.length >= 4 && burstinessCv < 0.24) {
+  if (sentenceWordCounts.length >= 4 && burstinessCv < 0.24) {
     findings.push({
       id: 'txt_low_burstiness',
       category: 'stylometry',
@@ -160,9 +246,9 @@ export function analyzeText(buf: Uint8Array, format: string): AnalyzerResult {
       titleEn: `Unusually uniform sentence length / low burstiness (CV=${round2(burstinessCv)})`,
       detailTr: 'İnsan yazımı kısa ve uzun cümleler arasında yüksek varyans gösterir; bu metnin cümle ritmi aşırı tekdüze.',
       detailEn: 'Human prose fluctuates strongly in sentence length; this document exhibits highly uniform cadence typical of LLM generation.',
-      evidence: `sentences=${sentences.length}, meanWords=${round2(meanLen)}, CV=${round2(burstinessCv)}`
+      evidence: `sentences=${sentenceWordCounts.length}, meanWords=${round2(meanLen)}, CV=${round2(burstinessCv)}`
     })
-  } else if (sentences.length >= 5 && burstinessCv >= 0.45 && matchedPhrases.length === 0) {
+  } else if (sentenceWordCounts.length >= 5 && burstinessCv >= 0.45 && matchedPhrases.length === 0) {
     findings.push({
       id: 'txt_natural_burstiness',
       category: 'stylometry',
@@ -190,8 +276,7 @@ export function analyzeText(buf: Uint8Array, format: string): AnalyzerResult {
     })
   }
 
-  // Check explicit AI signatures/headers (e.g. "Generated by ChatGPT", "C2PA", etc.)
-  const sigScan = scanTextForAiSignatures([trimmed.slice(0, 32768)], 'text')
+  const sigScan = scanBytesForAiSignatures([buf.subarray(0, phraseScanLen)], 'text')
   for (let i = 0; i < sigScan.findings.length; i++) findings.push(sigScan.findings[i]!)
   for (let i = 0; i < sigScan.generators.length; i++) addUnique(generatorHints, sigScan.generators[i]!)
 

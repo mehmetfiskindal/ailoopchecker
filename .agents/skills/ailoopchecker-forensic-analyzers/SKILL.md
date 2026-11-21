@@ -11,16 +11,17 @@ description: >-
 
 Use this runbook when adding or improving binary container parsers, pixel/DSP forensic algorithms, or stylometric detectors in `src/analyzers/`.
 
-## Module Map
+## Module Map (4-Layer Architecture)
 
-- `src/bytes.ts` — Magic-byte format detection (`detectMagicFormat`), endian-safe readers (`readU16BE/LE`, `readU32BE/LE`, `readU64BE`, `readI16LE`, `readF32LE`), ASCII extraction, Shannon entropy.
-- `src/analyzers/image.ts` — PNG (`IHDR`, `tEXt`, `zTXt`, `iTXt`, `eXIf`, `caBX`, `IDAT` pixel unfiltering), JPEG (`SOF0/2`, `APP1` EXIF+XMP, `APP11`, `DQT`, `COM`), WebP, BMP, GIF; 2D Laplacian & upsampler autocorrelation.
-- `src/analyzers/video.ts` — Recursive ISO Base Media (`MP4`/`MOV`) box parser, WebM/MKV EBML scan, AVI RIFF parser, `4k+1` temporal VAE frame counts, `stts`/`stsz`/`stss` variance.
-- `src/analyzers/audio.ts` — WAV RIFF + PCM/Float decoder, native 1024-point Radix-2 Hann-windowed STFT/FFT, MP3 ID3v2/ID3v1/MPEG frame parser, FLAC/OGG/Opus/M4A metadata.
-- `src/analyzers/code.ts` — Multi-language source code forensic analyzer (TS/JS, Python, Rust, Go, Swift, Kotlin, Java, C#, C/C++, Zig, Mojo, Gleam, Elixir, Ruby, PHP, Dart, Scala, SQL, Shell).
-- `src/analyzers/text.ts` — Turkish & English stylometry (cliché density, sentence burstiness CV, TTR, markdown template markers).
-- `src/scoring.ts` — Calibrated score aggregation (`evaluateFindings`).
-- `src/selftest.ts` — Synthetic in-memory binary/text fixtures for every analyzer.
+- **Shared (`src/shared/`):** `types.ts`, `bytes.ts` (magic-byte format detection, endian readers, O(N) `indexOfUtf8CI`), `inflate.ts` (pure TS zlib inflate).
+- **Core (`src/core/`):** `signatures.ts`, `scoring.ts`, `analyzer.ts`, `project-audit.ts`.
+- **Features (`src/features/`):**
+  - `src/features/image/analyzer.ts` — PNG (`IHDR`, `tEXt`, `zTXt`, `iTXt`, `eXIf`, `caBX`, `IDAT` pixel unfiltering), JPEG (`SOF0/2`, `APP1` EXIF+XMP, `APP11`, `DQT`, `COM`), WebP, BMP, GIF; 2D Laplacian & upsampler autocorrelation.
+  - `src/features/video/analyzer.ts` — Recursive ISO Base Media (`MP4`/`MOV`) box parser, WebM/MKV EBML scan, AVI RIFF parser, `4k+1` temporal VAE frame counts, `stts`/`stsz`/`stss` variance.
+  - `src/features/audio/analyzer.ts` — WAV RIFF + PCM/Float decoder, native 1024-point Radix-2 Hann-windowed STFT/FFT, MP3 ID3v2/ID3v1/MPEG frame parser, FLAC/OGG/Opus/M4A metadata.
+  - `src/features/code/analyzer.ts` — Multi-language source code & AI-loop forensic analyzer (21 modern languages + shebang).
+  - `src/features/text/analyzer.ts` — Turkish & English O(N) byte-level stylometry.
+- **Product (`src/product/`):** `cli.ts`, `report.ts`, `selftest.ts` (12 synthetic file + project tests), `index.ts` (SDK).
 
 ## Procedure for Adding a New Forensic Rule or Format
 

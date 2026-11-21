@@ -1,5 +1,6 @@
-import type { AnalyzerResult, ForensicFinding, KeyValueEntry } from '../types.ts'
+import type { AnalyzerResult, ForensicFinding, KeyValueEntry } from '../../shared/types.ts'
 import {
+  addUnique,
   asciiAt,
   extractAsciiRuns,
   printableSlice,
@@ -9,12 +10,11 @@ import {
   readU64BE,
   round2,
   shannonEntropy
-} from '../bytes.ts'
+} from '../../shared/bytes.ts'
 import {
-  addUnique,
   scanBinaryForC2paAndXmp,
   scanTextForAiSignatures
-} from '../signatures.ts'
+} from '../../core/signatures.ts'
 
 interface Mp4TrackSummary {
   handler: string

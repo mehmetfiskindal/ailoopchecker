@@ -5,7 +5,7 @@ import type {
   ProjectAuditReport,
   ProjectVerdict,
   Verdict
-} from './types.ts'
+} from '../shared/types.ts'
 
 interface AnsiPalette {
   reset: string
@@ -372,15 +372,46 @@ export function formatProjectReportText(
   }
 
   lines.push('')
-  lines.push(
-    `  ${c.bold}${lang === 'tr' ? 'Dosya Özeti' : 'Per-File Summary'}:${c.reset}`
-  )
+  const flagged: AnalysisReport[] = []
   for (let i = 0; i < project.reports.length; i++) {
     const r = project.reports[i]!
-    const vc = verdictColor(r.verdict, c)
+    if (r.verdict === 'CONFIRMED_AI' || r.verdict === 'LIKELY_AI' || r.error.length > 0) {
+      flagged.push(r)
+    }
+  }
+  if (!verbose && project.reports.length > 30) {
     lines.push(
-      `    - ${r.filePath} [${r.mediaCategory}/${r.detectedFormat}] -> ${vc}${r.verdict}${c.reset} (${r.aiScore}/100)`
+      `  ${c.bold}${lang === 'tr' ? 'AI İşaretli Dosyalar' : 'Flagged AI Files'} (${flagged.length}/${project.reports.length}):${c.reset}`
     )
+    const showLimit = Math.min(flagged.length, 40)
+    for (let i = 0; i < showLimit; i++) {
+      const r = flagged[i]!
+      const vc = verdictColor(r.verdict, c)
+      lines.push(
+        `    - ${r.filePath} [${r.mediaCategory}/${r.detectedFormat}] -> ${vc}${r.verdict}${c.reset} (${r.aiScore}/100)`
+      )
+    }
+    if (flagged.length > showLimit) {
+      lines.push(
+        `    ${c.dim}... +${flagged.length - showLimit} ${lang === 'tr' ? 'ek işaretli dosya (-v veya --json ile tümünü görün)' : 'more flagged files (use -v or --json to see all)'}${c.reset}`
+      )
+    }
+    if (flagged.length === 0) {
+      lines.push(
+        `    ${c.green}${lang === 'tr' ? 'Hiçbir dosya AI olarak işaretlenmedi.' : 'No files flagged as AI.'}${c.reset}`
+      )
+    }
+  } else {
+    lines.push(
+      `  ${c.bold}${lang === 'tr' ? 'Dosya Özeti' : 'Per-File Summary'}:${c.reset}`
+    )
+    for (let i = 0; i < project.reports.length; i++) {
+      const r = project.reports[i]!
+      const vc = verdictColor(r.verdict, c)
+      lines.push(
+        `    - ${r.filePath} [${r.mediaCategory}/${r.detectedFormat}] -> ${vc}${r.verdict}${c.reset} (${r.aiScore}/100)`
+      )
+    }
   }
 
   if (verbose) {

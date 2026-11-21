@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import type { MediaCategory } from './types.ts'
 
 export interface MagicDetection {
@@ -144,13 +145,62 @@ export function indexOfAscii(buf: Uint8Array, text: string, fromIndex: number = 
   return indexOfBytes(buf, needle, fromIndex)
 }
 
+// O(N) case-insensitive UTF-8 byte search: avoids O(N^2) UTF-16 toLowerCase/charCodeAt on large strings in C++.
+// Caller passes `lowerPattern` in lowercase UTF-8.
+export function indexOfUtf8CI(haystack: Uint8Array, lowerPattern: string, fromIndex: number = 0, maxLen: number = -1): number {
+  const needle = Buffer.from(lowerPattern, 'utf8')
+  const nLen = needle.length
+  if (nLen === 0) return fromIndex
+  const hayLen = maxLen < 0 ? haystack.length : Math.min(haystack.length, maxLen)
+  const limit = hayLen - nLen
+  if (limit < fromIndex) return -1
+
+  const first = needle[0]!
+  const firstUpper = first >= 97 && first <= 122 ? first - 32 : first
+
+  for (let i = Math.max(0, fromIndex); i <= limit; i++) {
+    const b0 = haystack[i]!
+    if (b0 !== first && b0 !== firstUpper) continue
+    let ok = true
+    for (let j = 1; j < nLen; j++) {
+      let hb = haystack[i + j]!
+      if (hb >= 65 && hb <= 90) hb += 32
+      if (hb !== needle[j]) {
+        ok = false
+        break
+      }
+    }
+    if (ok) return i
+  }
+  return -1
+}
+
+export function extractSnippetUtf8(buf: Uint8Array, matchByteOffset: number, patternByteLen: number): string {
+  const start = Math.max(0, matchByteOffset - 24)
+  const end = Math.min(buf.length, matchByteOffset + patternByteLen + 48)
+  let out = ''
+  let prevSpace = true
+  for (let i = start; i < end; i++) {
+    const b = buf[i]!
+    if (b === 32 || b === 9 || b === 10 || b === 13) {
+      if (!prevSpace) {
+        out += ' '
+        prevSpace = true
+      }
+    } else if (b >= 32 && b <= 126) {
+      out += String.fromCharCode(b)
+      prevSpace = false
+    }
+  }
+  return out.trim()
+}
+
 export function shannonEntropy(buf: Uint8Array, start: number = 0, length: number = -1): number {
   const s = Math.max(0, start)
   const end = length < 0 ? buf.length : Math.min(buf.length, s + length)
   const total = end - s
   if (total <= 0) return 0
   const counts = new Int32Array(256)
-  // Sample large buffers deterministically for O(1) speed
   const step = total > 262144 ? Math.floor(total / 262144) : 1
   let sampled = 0
   for (let i = s; i < end; i += step) {
@@ -180,6 +230,13 @@ export function clamp(v: number, min: number, max: number): number {
   return v
 }
 
+export function addUnique(list: string[], value: string): void {
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === value) return
+  }
+  list.push(value)
+}
+
 export function isLikelyUtf8Text(buf: Uint8Array): boolean {
   const limit = Math.min(buf.length, 4096)
   if (limit === 0) return false
@@ -192,130 +249,6 @@ export function isLikelyUtf8Text(buf: Uint8Array): boolean {
     }
   }
   return controlBytes / limit < 0.02
-}
-
-export function detectMagicFormat(buf: Uint8Array, fileExtLower: string): MagicDetection {
-  if (buf.length >= 8) {
-    // PNG: 89 50 4E 47 0D 0A 1A 0A
-    if (
-      buf[0] === 0x89 &&
-      buf[1] === 0x50 &&
-      buf[2] === 0x4e &&
-      buf[3] === 0x47 &&
-      buf[4] === 0x0d &&
-      buf[5] === 0x0a &&
-      buf[6] === 0x1a &&
-      buf[7] === 0x0a
-    ) {
-      return { category: 'image', format: 'PNG' }
-    }
-  }
-
-  // JPEG: FF D8 FF
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
-    return { category: 'image', format: 'JPEG' }
-  }
-
-  // GIF: GIF87a / GIF89a
-  if (buf.length >= 6) {
-    const g = asciiAt(buf, 0, 6)
-    if (g === 'GIF87a' || g === 'GIF89a') {
-      return { category: 'image', format: 'GIF' }
-    }
-  }
-
-  // BMP: BM
-  if (buf.length >= 14 && buf[0] === 0x42 && buf[1] === 0x4d) {
-    const declaredSize = readU32LE(buf, 2)
-    if (declaredSize > 0 && declaredSize <= buf.length + 1024) {
-      return { category: 'image', format: 'BMP' }
-    }
-  }
-
-  // TIFF: II*\0 or MM\0*
-  if (
-    buf.length >= 4 &&
-    ((buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00) ||
-      (buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a))
-  ) {
-    return { category: 'image', format: 'TIFF' }
-  }
-
-  // RIFF containers: WEBP, WAVE, AVI
-  if (buf.length >= 12 && asciiAt(buf, 0, 4) === 'RIFF') {
-    const riffType = asciiAt(buf, 8, 4)
-    if (riffType === 'WEBP') return { category: 'image', format: 'WEBP' }
-    if (riffType === 'WAVE') return { category: 'audio', format: 'WAV' }
-    if (riffType === 'AVI ') return { category: 'video', format: 'AVI' }
-  }
-
-  // ISO Base Media (MP4, MOV, M4A, AVIF, HEIC)
-  if (buf.length >= 12 && asciiAt(buf, 4, 4) === 'ftyp') {
-    const majorBrand = asciiAt(buf, 8, 4)
-    if (majorBrand === 'avif' || majorBrand === 'avis' || majorBrand === 'heic' || majorBrand === 'heix' || majorBrand === 'mif1') {
-      return { category: 'image', format: majorBrand.toUpperCase() }
-    }
-    if (majorBrand === 'M4A ' || majorBrand === 'M4B ' || fileExtLower === '.m4a') {
-      return { category: 'audio', format: 'M4A' }
-    }
-    if (majorBrand === 'qt  ' || fileExtLower === '.mov') {
-      return { category: 'video', format: 'MOV' }
-    }
-    return { category: 'video', format: 'MP4' }
-  }
-
-  // Matroska / WebM EBML: 1A 45 DF A3
-  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
-    if (indexOfAscii(buf.subarray(0, Math.min(buf.length, 64)), 'webm') >= 0 || fileExtLower === '.webm') {
-      return { category: 'video', format: 'WEBM' }
-    }
-    return { category: 'video', format: 'MKV' }
-  }
-
-  // FLAC: fLaC
-  if (buf.length >= 4 && asciiAt(buf, 0, 4) === 'fLaC') {
-    return { category: 'audio', format: 'FLAC' }
-  }
-
-  // OGG / Opus: OggS
-  if (buf.length >= 4 && asciiAt(buf, 0, 4) === 'OggS') {
-    const head = buf.subarray(0, Math.min(buf.length, 64))
-    if (indexOfAscii(head, 'OpusHead') >= 0) {
-      return { category: 'audio', format: 'OPUS' }
-    }
-    return { category: 'audio', format: 'OGG' }
-  }
-
-  // MP3: ID3 tag or MPEG Audio Frame Sync (FF FB / FF F3 / FF F2 / FF FA)
-  if (buf.length >= 3 && asciiAt(buf, 0, 3) === 'ID3') {
-    return { category: 'audio', format: 'MP3' }
-  }
-  if (buf.length >= 2 && buf[0] === 0xff && (buf[1]! & 0xe0) === 0xe0 && (buf[1]! & 0x06) !== 0) {
-    return { category: 'audio', format: 'MP3' }
-  }
-
-  // Source code languages (modern JS/TS, Python, Rust, Go, Swift, Kotlin, Java, C#, C/C++, Zig, etc.)
-  const codeFormat = detectCodeFormat(buf, fileExtLower)
-  if (codeFormat.length > 0) {
-    return { category: 'code', format: codeFormat }
-  }
-
-  // Extension fallback for text/documents
-  if (
-    fileExtLower === '.txt' ||
-    fileExtLower === '.md' ||
-    fileExtLower === '.markdown' ||
-    fileExtLower === '.html' ||
-    fileExtLower === '.htm' ||
-    fileExtLower === '.json' ||
-    fileExtLower === '.csv' ||
-    fileExtLower === '.xml' ||
-    isLikelyUtf8Text(buf)
-  ) {
-    return { category: 'text', format: fileExtLower.length > 1 ? fileExtLower.slice(1).toUpperCase() : 'TEXT' }
-  }
-
-  return { category: 'unknown', format: 'BINARY' }
 }
 
 function detectCodeFormat(buf: Uint8Array, ext: string): string {
@@ -341,7 +274,6 @@ function detectCodeFormat(buf: Uint8Array, ext: string): string {
   if (ext === '.sql') return 'SQL'
   if (ext === '.sh' || ext === '.bash' || ext === '.zsh') return 'SHELL'
 
-  // Shebang detection for extensionless scripts
   if (buf.length >= 10 && buf[0] === 0x23 && buf[1] === 0x21) {
     const firstLine = printableSlice(buf, 0, Math.min(buf.length, 128), 128).split('\n')[0] ?? ''
     const lower = firstLine.toLowerCase()
@@ -354,4 +286,114 @@ function detectCodeFormat(buf: Uint8Array, ext: string): string {
     if (lower.indexOf('bash') >= 0 || lower.indexOf('/sh') >= 0 || lower.indexOf('zsh') >= 0) return 'SHELL'
   }
   return ''
+}
+
+export function detectMagicFormat(buf: Uint8Array, fileExtLower: string): MagicDetection {
+  if (
+    buf.length >= 8 &&
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  ) {
+    return { category: 'image', format: 'PNG' }
+  }
+
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return { category: 'image', format: 'JPEG' }
+  }
+
+  if (buf.length >= 6) {
+    const g = asciiAt(buf, 0, 6)
+    if (g === 'GIF87a' || g === 'GIF89a') {
+      return { category: 'image', format: 'GIF' }
+    }
+  }
+
+  if (buf.length >= 14 && buf[0] === 0x42 && buf[1] === 0x4d) {
+    const declaredSize = readU32LE(buf, 2)
+    if (declaredSize > 0 && declaredSize <= buf.length + 1024) {
+      return { category: 'image', format: 'BMP' }
+    }
+  }
+
+  if (
+    buf.length >= 4 &&
+    ((buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00) ||
+      (buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a))
+  ) {
+    return { category: 'image', format: 'TIFF' }
+  }
+
+  if (buf.length >= 12 && asciiAt(buf, 0, 4) === 'RIFF') {
+    const riffType = asciiAt(buf, 8, 4)
+    if (riffType === 'WEBP') return { category: 'image', format: 'WEBP' }
+    if (riffType === 'WAVE') return { category: 'audio', format: 'WAV' }
+    if (riffType === 'AVI ') return { category: 'video', format: 'AVI' }
+  }
+
+  if (buf.length >= 12 && asciiAt(buf, 4, 4) === 'ftyp') {
+    const majorBrand = asciiAt(buf, 8, 4)
+    if (majorBrand === 'avif' || majorBrand === 'avis' || majorBrand === 'heic' || majorBrand === 'heix' || majorBrand === 'mif1') {
+      return { category: 'image', format: majorBrand.toUpperCase() }
+    }
+    if (majorBrand === 'M4A ' || majorBrand === 'M4B ' || fileExtLower === '.m4a') {
+      return { category: 'audio', format: 'M4A' }
+    }
+    if (majorBrand === 'qt  ' || fileExtLower === '.mov') {
+      return { category: 'video', format: 'MOV' }
+    }
+    return { category: 'video', format: 'MP4' }
+  }
+
+  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
+    if (indexOfAscii(buf.subarray(0, Math.min(buf.length, 64)), 'webm') >= 0 || fileExtLower === '.webm') {
+      return { category: 'video', format: 'WEBM' }
+    }
+    return { category: 'video', format: 'MKV' }
+  }
+
+  if (buf.length >= 4 && asciiAt(buf, 0, 4) === 'fLaC') {
+    return { category: 'audio', format: 'FLAC' }
+  }
+
+  if (buf.length >= 4 && asciiAt(buf, 0, 4) === 'OggS') {
+    const head = buf.subarray(0, Math.min(buf.length, 64))
+    if (indexOfAscii(head, 'OpusHead') >= 0) {
+      return { category: 'audio', format: 'OPUS' }
+    }
+    return { category: 'audio', format: 'OGG' }
+  }
+
+  if (buf.length >= 3 && asciiAt(buf, 0, 3) === 'ID3') {
+    return { category: 'audio', format: 'MP3' }
+  }
+  if (buf.length >= 2 && buf[0] === 0xff && (buf[1]! & 0xe0) === 0xe0 && (buf[1]! & 0x06) !== 0) {
+    return { category: 'audio', format: 'MP3' }
+  }
+
+  const codeFormat = detectCodeFormat(buf, fileExtLower)
+  if (codeFormat.length > 0) {
+    return { category: 'code', format: codeFormat }
+  }
+
+  if (
+    fileExtLower === '.txt' ||
+    fileExtLower === '.md' ||
+    fileExtLower === '.markdown' ||
+    fileExtLower === '.html' ||
+    fileExtLower === '.htm' ||
+    fileExtLower === '.json' ||
+    fileExtLower === '.csv' ||
+    fileExtLower === '.xml' ||
+    isLikelyUtf8Text(buf)
+  ) {
+    return { category: 'text', format: fileExtLower.length > 1 ? fileExtLower.slice(1).toUpperCase() : 'TEXT' }
+  }
+
+  return { category: 'unknown', format: 'BINARY' }
 }

@@ -42,16 +42,18 @@ npm run test:native
 ## Nasıl Katkı Sağlayabilirsiniz?
 
 ### 1. Yeni AI Üretici İmzası Ekleme
-- `src/signatures.ts` içindeki `AI_SIGNATURE_RULES` listesine yeni kural ekleyin (`id`, `pattern`, `generator`, `category`, `scoreDelta`, `strong`).
+- `src/core/signatures.ts` içindeki `AI_SIGNATURE_RULES` listesine yeni kural ekleyin (`id`, `pattern`, `generator`, `category`, `scoreDelta`, `strong`).
 - Yanlış pozitif (*false positive*) riskini azaltmak için genel kelimeler yerine üreticiye özgü belirteçler seçin (ör. `runway gen-` veya `klingai`, tek başına `gen` değil).
-- `src/selftest.ts` içine en az bir sentetik doğrulama vakası ekleyin.
+- `src/product/selftest.ts` içine en az bir sentetik doğrulama vakası ekleyin.
 
 ### 2. Yeni Medya Formatı veya Sinyal/DSP Metriği Ekleme
-- İlgili çözümleyiciyi güncelleyin:
-  - Görsel: `src/analyzers/image.ts`
-  - Video: `src/analyzers/video.ts`
-  - Ses: `src/analyzers/audio.ts`
-  - Metin: `src/analyzers/text.ts`
+- İlgili dikey özellik modülünü (`src/features/`) güncelleyin:
+  - Görsel: `src/features/image/analyzer.ts`
+  - Video: `src/features/video/analyzer.ts`
+  - Ses: `src/features/audio/analyzer.ts`
+  - Kaynak Kod: `src/features/code/analyzer.ts`
+  - Metin: `src/features/text/analyzer.ts`
+- Katman sınırlarını koruyun: `shared/` → `core/` → `features/` → `product/` (döngüsel içe aktarma eklemeyin).
 - Her yeni bulgu için hem **Türkçe (`titleTr`, `detailTr`)** hem **İngilizce (`titleEn`, `detailEn`)** açıklamalar ekleyin.
 - Bellek ve döngü sınırları ekleyin (bozuk/kötü niyetli dosyalarda OOM veya sonsuz döngü olmamalı).
 

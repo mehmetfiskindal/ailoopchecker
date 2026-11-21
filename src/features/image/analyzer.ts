@@ -1,7 +1,8 @@
 import { Buffer } from 'node:buffer'
-import { inflateZlib } from '../inflate.ts'
-import type { AnalyzerResult, ForensicFinding, KeyValueEntry } from '../types.ts'
+import { inflateZlib } from '../../shared/inflate.ts'
+import type { AnalyzerResult, ForensicFinding, KeyValueEntry } from '../../shared/types.ts'
 import {
+  addUnique,
   asciiAt,
   indexOfAscii,
   printableSlice,
@@ -11,12 +12,11 @@ import {
   readU32LE,
   round2,
   shannonEntropy
-} from '../bytes.ts'
+} from '../../shared/bytes.ts'
 import {
-  addUnique,
   scanBinaryForC2paAndXmp,
   scanTextForAiSignatures
-} from '../signatures.ts'
+} from '../../core/signatures.ts'
 
 interface DecodedRgbImage {
   width: number
@@ -129,8 +129,8 @@ function decodePngPixels(
 ): DecodedRgbImage | null {
   if (bitDepth !== 8 || interlace !== 0) return null
   if (colorType !== 0 && colorType !== 2 && colorType !== 6) return null
-  // Cap decoding at ~6 MP to stay fast and bounded in memory
-  if (width <= 0 || height <= 0 || width * height > 6000000) return null
+  // Cap decoding at ~2.2 MP (covers all canonical AI grids up to 1536x1408 while keeping bulk scans fast)
+  if (width <= 0 || height <= 0 || width * height > 2200000) return null
   if (idatChunks.length === 0) return null
 
   let totalCompressed = 0

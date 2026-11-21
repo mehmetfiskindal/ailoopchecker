@@ -1,14 +1,12 @@
-import { Buffer } from 'node:buffer'
 import { basename } from 'node:path'
 import type {
   AnalysisReport,
   ForensicFinding,
   ProjectAuditReport,
   ProjectVerdict
-} from './types.ts'
+} from '../shared/types.ts'
+import { addUnique, clamp, round2 } from '../shared/bytes.ts'
 import { analyzeBuffer, analyzeFile } from './analyzer.ts'
-import { clamp, round2 } from './bytes.ts'
-import { addUnique } from './signatures.ts'
 
 export interface ProjectMemoryFile {
   filePath: string
@@ -49,15 +47,57 @@ function isAiLoopConfigFile(filePath: string): boolean {
   return false
 }
 
-function extractNormalizedLines(buf: Uint8Array): Set<string> {
-  const text = Buffer.from(buf).toString('utf8')
-  const lines = text.split(/\r?\n/)
-  const unique = new Set<string>()
-  for (let i = 0; i < lines.length && i < 2000; i++) {
-    const norm = lines[i]!.trim().replace(/\s+/g, ' ').toLowerCase()
-    // Keep meaningful lines (>= 28 chars) so trivial braces/imports don't inflate duplication
-    if (norm.length >= 28 && !norm.startsWith('import ') && !norm.startsWith('from ')) {
-      unique.add(norm)
+// Pure O(N) byte-level normalized line hashing: zero string allocations in hot loops.
+function extractNormalizedLineHashes(buf: Uint8Array): Set<number> {
+  const limit = Math.min(buf.length, 65536)
+  const unique = new Set<number>()
+  let lineCount = 0
+  let i = 0
+  while (i < limit && lineCount < 800) {
+    let lineStart = i
+    while (i < limit && buf[i] !== 10) i++
+    const lineEnd = i
+    if (i < limit) i++
+    lineCount++
+
+    while (lineStart < lineEnd && (buf[lineStart] === 32 || buf[lineStart] === 9 || buf[lineStart] === 13)) {
+      lineStart++
+    }
+    let end = lineEnd
+    while (end > lineStart && (buf[end - 1] === 32 || buf[end - 1] === 9 || buf[end - 1] === 13)) {
+      end--
+    }
+    const rawLen = end - lineStart
+    if (rawLen < 28) continue
+
+    if (
+      rawLen >= 7 &&
+      ((buf[lineStart] === 105 && buf[lineStart + 1] === 109 && buf[lineStart + 2] === 112 && buf[lineStart + 3] === 111) ||
+        (buf[lineStart] === 102 && buf[lineStart + 1] === 114 && buf[lineStart + 2] === 111 && buf[lineStart + 3] === 109))
+    ) {
+      continue
+    }
+
+    let h = 2166136261
+    let prevSpace = false
+    let normLen = 0
+    for (let k = lineStart; k < end; k++) {
+      let b = buf[k]!
+      if (b === 32 || b === 9 || b === 13) {
+        if (!prevSpace) {
+          h = Math.imul(h ^ 32, 16777619)
+          normLen++
+          prevSpace = true
+        }
+      } else {
+        if (b >= 65 && b <= 90) b += 32
+        h = Math.imul(h ^ b, 16777619)
+        normLen++
+        prevSpace = false
+      }
+    }
+    if (normLen >= 28) {
+      unique.add(h >>> 0)
     }
   }
   return unique
@@ -65,15 +105,15 @@ function extractNormalizedLines(buf: Uint8Array): Set<string> {
 
 function computeCrossFileDuplication(
   reports: AnalysisReport[],
-  lineSets: Set<string>[]
+  lineSets: Set<number>[]
 ): number {
-  const lineFreq = new Map<string, number>()
+  const lineFreq = new Map<number, number>()
   let totalMeaningfulLines = 0
   for (let i = 0; i < lineSets.length; i++) {
     const s = lineSets[i]!
-    for (const line of s) {
+    for (const h of s) {
       totalMeaningfulLines++
-      lineFreq.set(line, (lineFreq.get(line) ?? 0) + 1)
+      lineFreq.set(h, (lineFreq.get(h) ?? 0) + 1)
     }
   }
   if (totalMeaningfulLines === 0 || lineSets.length < 2) return 0
@@ -83,26 +123,28 @@ function computeCrossFileDuplication(
     if (count >= 2) duplicatedOccurrences += count
   }
 
-  // Also count exact duplicate SHA-256 across non-empty files
+  // Only count duplicate SHA-256 on non-trivial files (>= 256 bytes) so empty/tiny stubs don't inflate duplication
   const hashCounts = new Map<string, number>()
+  let nonTrivialFiles = 0
   for (let i = 0; i < reports.length; i++) {
     const r = reports[i]!
-    if (r.error.length > 0 || r.sha256.length === 0) continue
+    if (r.error.length > 0 || r.sha256.length === 0 || r.fileSize < 256) continue
+    nonTrivialFiles++
     hashCounts.set(r.sha256, (hashCounts.get(r.sha256) ?? 0) + 1)
   }
-  let duplicateFileBonus = 0
+  let duplicateFiles = 0
   for (const c of hashCounts.values()) {
-    if (c >= 2) duplicateFileBonus += 15 * (c - 1)
+    if (c >= 2) duplicateFiles += c - 1
   }
-
+  const dupFileRatioPct = nonTrivialFiles > 0 ? (duplicateFiles / nonTrivialFiles) * 100 : 0
   const lineDupPct = (duplicatedOccurrences / totalMeaningfulLines) * 100
-  return round2(clamp(lineDupPct + duplicateFileBonus, 0, 100))
+  return round2(clamp(lineDupPct + dupFileRatioPct * 0.5, 0, 100))
 }
 
 function buildProjectSummary(
   projectName: string,
   reports: AnalysisReport[],
-  lineSets: Set<string>[],
+  lineSets: Set<number>[],
   startedMs: number,
   threshold: number
 ): ProjectAuditReport {
@@ -162,7 +204,6 @@ function buildProjectSummary(
 
   let projectScore = 10
 
-  // 1. Project-wide AI file ratio
   if (analyzedFiles >= 2 && aiRatio >= 0.6) {
     const delta = Math.round(28 + aiRatio * 24)
     projectScore += delta
@@ -193,7 +234,6 @@ function buildProjectSummary(
     })
   }
 
-  // 2. Multi-modal AI stack (code + image/video/audio + text all AI-generated)
   if (modalitiesWithAi.length >= 2) {
     const delta = modalitiesWithAi.length >= 3 ? 26 : 16
     projectScore += delta
@@ -210,7 +250,6 @@ function buildProjectSummary(
     })
   }
 
-  // 3. Unbounded / self-feeding LLM loops in project source code
   if (unboundedLlmLoops > 0 || selfFeedbackLoops > 0) {
     const delta = unboundedLlmLoops > 0 ? 32 : 20
     projectScore += delta
@@ -227,14 +266,13 @@ function buildProjectSummary(
     })
   }
 
-  // 4. Cross-file boilerplate / AI regeneration duplication
-  if (crossFileDupPct >= 22 && analyzedFiles >= 2) {
-    const delta = crossFileDupPct >= 45 ? 20 : 12
+  if (crossFileDupPct >= 25 && analyzedFiles >= 2) {
+    const delta = crossFileDupPct >= 50 ? 20 : 12
     projectScore += delta
     findings.push({
       id: 'proj_cross_file_ai_repetition',
       category: 'ailoop',
-      severity: crossFileDupPct >= 45 ? 'high' : 'medium',
+      severity: crossFileDupPct >= 50 ? 'high' : 'medium',
       scoreDelta: delta,
       titleTr: `Dosyalar arası yüksek şablon/kalıp tekrarı (%${crossFileDupPct})`,
       titleEn: `High cross-file boilerplate repetition (${crossFileDupPct}%)`,
@@ -244,7 +282,6 @@ function buildProjectSummary(
     })
   }
 
-  // 5. Copy-pasted LLM omission artifacts across files
   if (omissionFiles >= 1) {
     const delta = Math.min(24, 12 + omissionFiles * 6)
     projectScore += delta
@@ -261,7 +298,6 @@ function buildProjectSummary(
     })
   }
 
-  // 6. Agent / AI-loop config files (contextual signal)
   if (configMarkersFound.length > 0) {
     const delta = aiRatio >= 0.4 || unboundedLlmLoops > 0 ? 14 : 6
     projectScore += delta
@@ -278,7 +314,6 @@ function buildProjectSummary(
     })
   }
 
-  // 7. Authentic organic project counter-signal
   if (
     analyzedFiles >= 2 &&
     authenticRatio >= 0.65 &&
@@ -348,14 +383,14 @@ export function auditProjectBuffers(
 ): ProjectAuditReport {
   const started = performance.now()
   const reports: AnalysisReport[] = []
-  const lineSets: Set<string>[] = []
+  const lineSets: Set<number>[] = []
 
   for (let i = 0; i < files.length; i++) {
     const f = files[i]!
     const report = analyzeBuffer(f.data, f.filePath, threshold)
     reports.push(report)
     if (report.mediaCategory === 'code' || report.mediaCategory === 'text') {
-      lineSets.push(extractNormalizedLines(f.data))
+      lineSets.push(extractNormalizedLineHashes(f.data))
     }
   }
 
@@ -370,7 +405,7 @@ export async function auditProjectFiles(
 ): Promise<ProjectAuditReport> {
   const started = performance.now()
   const reports: AnalysisReport[] = []
-  const lineSets: Set<string>[] = []
+  const lineSets: Set<number>[] = []
 
   for (let i = 0; i < filePaths.length; i++) {
     const filePath = filePaths[i]!
@@ -379,7 +414,7 @@ export async function auditProjectFiles(
     if (report.error.length === 0 && (report.mediaCategory === 'code' || report.mediaCategory === 'text')) {
       const raw = await readBytesForDuplication(filePath)
       if (raw !== null) {
-        lineSets.push(extractNormalizedLines(raw))
+        lineSets.push(extractNormalizedLineHashes(raw))
       }
     }
   }

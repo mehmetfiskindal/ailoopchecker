@@ -1,8 +1,8 @@
 import { Buffer } from 'node:buffer'
-import { zlibWrapUncompressed } from './inflate.ts'
-import type { AnalysisReport, OutputLang, ProjectVerdict, Verdict } from './types.ts'
-import { analyzeBuffer } from './analyzer.ts'
-import { auditProjectBuffers } from './project-audit.ts'
+import { zlibWrapUncompressed } from '../shared/inflate.ts'
+import type { AnalysisReport, OutputLang, ProjectVerdict, Verdict } from '../shared/types.ts'
+import { analyzeBuffer } from '../core/analyzer.ts'
+import { auditProjectBuffers } from '../core/project-audit.ts'
 import { formatProjectReportText, formatReportText } from './report.ts'
 
 interface SelfTestCase {

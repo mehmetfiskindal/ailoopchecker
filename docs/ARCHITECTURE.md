@@ -1,13 +1,55 @@
-# Mimari Genel Bakış / Architecture
+# Mimari Genel Bakış / Layered Architecture
 
-`ailoopchecker`, tek bir statik tipli TypeScript kod tabanından hem **Node.js 22+** üzerinde doğrudan çalıştırılabilir hem de **`geatsc` (AOT TypeScript → C++)** ile bağımsız native ikili dosyaya (`dist/ailoopchecker`) derlenebilir biçimde tasarlanmıştır.
+`ailoopchecker`, tek bir statik tipli TypeScript kod tabanından hem **Node.js 22+** üzerinde doğrudan çalıştırılabilir hem de **`geatsc` (AOT TypeScript → C++)** ile bağımsız native ikili dosyaya (`dist/ailoopchecker`) derlenebilir biçimde **4 katmanlı (`shared` → `core` → `features` → `product`)** olarak yapılandırılmıştır.
 
-## 1. Derleme ve Çalıştırma Hattı
+---
+
+## 1. Katman Yapısı ve Bağımlılık Kuralları
 
 ```text
-src/cli.ts (+ src/**/*.ts)
+src/
+├── shared/                      # Katman 1: Alandan bağımsız temel tipler ve ikili/sıkıştırma yardımcıları
+│   ├── types.ts                 # Ortak veri sözleşmeleri (MediaCategory, Verdict, ProjectAuditReport, CliOptions)
+│   ├── bytes.ts                 # Endian-güvenli okuyucular, magic-byte tespiti, O(N) bayt-düzeyi UTF-8 CI arama
+│   └── inflate.ts               # Saf TypeScript RFC 1950/1951 zlib inflate (libbrotlidec bağımlılığı yok)
+│
+├── core/                        # Katman 2: Çekirdek adli motor ve proje AI-Loop orkestrasyonu
+│   ├── signatures.ts            # C2PA/JUMBF, IPTC DigitalSourceType ve 60+ AI üretici imza tarayıcı
+│   ├── scoring.ts               # Kalibre edilmiş dosya skoru, doğrulama tavanı (58) ve karar motoru
+│   ├── analyzer.ts              # Dosya/tampon okuma, SHA-256 ve ilgili feature çözümleyicisine yönlendirme
+│   └── project-audit.ts         # Proje düzeyi AI-Loop birleştirme, çapraz tekrar (FNV-1a) ve çok katmanlı yığın analizi
+│
+├── features/                    # Katman 3: Bağımsız dikey adli özellik modülleri
+│   ├── image/analyzer.ts        # Görsel/ürün adli analizi (PNG/JPEG/WebP/BMP/GIF/TIFF + Laplacian/VAE ızgara)
+│   ├── video/analyzer.ts        # Video konteyner analizi (MP4/MOV ISOBMFF, WebM/MKV, AVI, 4k+1 kare, stts/stsz)
+│   ├── audio/analyzer.ts        # Ses ve DSP analizi (WAV 1024-pt Radix-2 STFT/FFT, MP3, FLAC, OGG/Opus)
+│   ├── code/analyzer.ts         # 21 modern dil için kaynak kod ve otonom/sınırsız AI-Loop tespiti
+│   └── text/analyzer.ts         # Türkçe/İngilizce ürün metni ve doküman stilometrisi (O(N) bayt tarama)
+│
+├── product/                     # Katman 4: Ürün teslim yüzeyleri (CLI, Raporlayıcı, SDK, Self-Test)
+│   ├── cli.ts                   # CLI girişi (process.argv, --project, --file-list, --strict, --json)
+│   ├── report.ts                # ANSI terminal ve deterministik JSON serileştiricileri (dosya + proje)
+│   ├── selftest.ts              # 12 sentetik dosya + proje AI-Loop uçtan uca doğrulama vakası
+│   └── index.ts                 # JS/TS SDK dışa aktarım kapısı
+│
+├── cli.ts                       # İnce uyumluluk girişi -> ./product/cli.ts
+└── index.ts                     # İnce uyumluluk girişi -> ./product/index.ts
+```
+
+### Katı Bağımlılık Yönü (Döngüsel Bağımlılık Yok)
+- **`shared/`** → başka hiçbir `src/` katmanına bağımlı değildir.
+- **`features/*/`** → yalnızca `shared/` ve `core/signatures.ts` modüllerine bağımlıdır; feature'lar birbirini ithal etmez ve `product/` katmanını bilmez.
+- **`core/`** → `shared/` ve (yönlendirici `core/analyzer.ts` üzerinden) `features/*/analyzer.ts` katmanlarını kullanır; `product/` katmanına bağımlı değildir.
+- **`product/`** → `shared/`, `core/` ve `features/` katmanlarını birleştirerek CLI, terminal/JSON rapor, SDK ve self-test ürün yüzeylerini sunar.
+
+---
+
+## 2. Derleme ve Performans Tasarımı
+
+```text
+src/cli.ts -> src/product/cli.ts
         │
-        ├──► Node.js 22+ (doğrudan çalıştırma: node src/cli.ts)
+        ├──► Node.js 22+ (doğrudan çalıştırma)
         │
         └──► geatsc (@geastack/compiler + @geastack/node-compat)
                     │
@@ -15,33 +57,20 @@ src/cli.ts (+ src/**/*.ts)
              dist/.geatsc/ailoopchecker/ailoopchecker.cpp
                     │
                     ▼  (clang++ veya g++, -O2/-Os, LTO, strip)
-             dist/ailoopchecker  (~2.9 MB native ELF ikili)
+             dist/ailoopchecker  (native ELF ikili)
 ```
 
-### Neden Saf TypeScript `inflateZlib`?
-`PNG` dosyalarının `IDAT`, `zTXt` ve `iTXt` bloklarını açmak için RFC 1950/1951 deflate açıcı gerekir. `node:zlib` içe aktarımı `@geastack/node-compat` tarafında `libbrotlidec` bağlantısını da tetikler. `src/inflate.ts` içinde yazılan saf TypeScript `inflateZlib`, harici `libbrotlidec` bağımlılığını ortadan kaldırır ve `geatsc` tarafından doğrudan optimize C++ döngülerine derlenir.
-
----
-
-## 2. Analiz Akışı
-
-Her dosya [src/analyzer.ts](../src/analyzer.ts) üzerinden şu 5 aşamadan geçer:
-
-1. **Dosya Okuma & SHA-256:** `fs.promises.readFile` ile salt-okunur bellek yüklemesi ve `node:crypto` üzerinden deterministik SHA-256 özeti.
-2. **Sihirli Bayt (Magic Bytes) Tanıma ([src/bytes.ts](../src/bytes.ts)):** Uzantıya körü körüne güvenmek yerine ikili başlık imzalarına (`PNG`, `JPEG`, `WEBP`, `BMP`, `GIF`, `TIFF`, `RIFF/WAVE`, `RIFF/AVI`, `ftyp` MP4/MOV/M4A/AVIF, `EBML` WebM/MKV, `fLaC`, `OggS`/Opus, `ID3`/MPEG sync veya UTF-8 metin) göre kategori seçilir.
-3. **Alana Özel Adli Çözümleyici:**
-   - [src/analyzers/image.ts](../src/analyzers/image.ts): Konteyner/EXIF/XMP/C2PA + PNG/BMP piksel açma + 2D Laplacian & 2/4/8 piksel otokorelasyon.
-   - [src/analyzers/video.ts](../src/analyzers/video.ts): Özyinelemeli ISO Base Media kutu ağacı + zamansal `4k+1` kare/CFR/GOP/`stsz` varyansı + WebM/AVI taraması.
-   - [src/analyzers/audio.ts](../src/analyzers/audio.ts): WAV/MP3/FLAC/OGG/Opus konteynerleri + 1024-noktalı Radix-2 Cooley-Tukey Hann-pencereli STFT/FFT DSP motoru.
-   - [src/analyzers/text.ts](../src/analyzers/text.ts): Türkçe/İngilizce LLM kalıp yoğunluğu, cümle uzunluğu *burstiness* CV'si ve şablon biçimlendirme taraması.
-4. **Köken ve İmza Tarayıcı ([src/signatures.ts](../src/signatures.ts)):** Hem çıkarılmış metin bloklarında hem de ikili başlık/kuyruk pencerelerinde C2PA/JUMBF, IPTC `DigitalSourceType` ve 60+ bilinen AI görsel/video/ses üretici imzasını arar.
-5. **Kalibre Edilmiş Skorlama ([src/scoring.ts](../src/scoring.ts)):** Pozitif AI bulgularını ve negatif otantik kanıtları (gerçek kamera EXIF, BEXT, QuickTime cihaz etiketleri, doğal mikrofon oda gürültüsü, doğal sensör gürültüsü) birleştirerek `0–100` arası `aiScore`, `confidence` ve `verdict` üretir.
+### Neden Bayt-Düzeyi `O(N)` Tarama (`shared/bytes.ts`)?
+- `geatsc` C++ çalışma zamanında `std::string` UTF-8 tuttuğu için büyük stringler üzerinde `charCodeAt(i)` / `toLowerCase()` döngüleri `O(N²)` maliyet üretebilir.
+- Bu nedenle `shared/bytes.ts` (`indexOfUtf8CI`), `core/signatures.ts` (`scanBytesForAiSignatures`), `core/project-audit.ts` (FNV-1a satır özeti), `features/text/analyzer.ts` ve `features/code/analyzer.ts` büyük dosyaları doğrudan `Uint8Array` baytları üzerinde `O(N)` hızda tarar.
+- `shared/inflate.ts` içindeki saf TypeScript RFC 1950/1951 `inflateZlib` ise `node:zlib` üzerinden gelen `libbrotlidec` bağımlılığını ortadan kaldırır.
 
 ---
 
 ## 3. Skorlama ve Yanlış Pozitif Koruması
 
-- **Başlangıç tabanı:** `15` (nötr)
-- **Doğrulama şartı:** Açık bir kriptografik/üretici imzası (`critical`, `scoreDelta >= 45`) yoksa tek bir zayıf sezgisel bulgu skoru `58`'in üzerine çıkaramaz; `LIKELY_AI` kararı (varsayılan eşik `60`) için en az iki bağımsız bulgunun örtüşmesi gerekir.
-- **Kesin AI kuralı:** C2PA/IPTC `trainedAlgorithmicMedia` veya doğrudan üretici parametreleri (ör. A1111 `Steps/Sampler/CFG`, ComfyUI `KSampler`, ElevenLabs, Sora, Suno) bulunduğunda skor en az `85`, güven en az `%92` ve karar `CONFIRMED_AI` olur.
-- **Otantik kanıtlar negatif ağırlık taşır:** Optik kamera EXIF zinciri (`-24`), akıllı telefon QuickTime cihaz etiketi + UTC zaman damgası (`-22`), doğal mikrofon oda gürültüsü (`-18`) ve BEXT başlığı (`-12`) yanlış pozitifleri önler.
+- **Dosya düzeyi ([src/core/scoring.ts](../src/core/scoring.ts)):**
+  - Nötr taban `15`. Açık kritik AI köken imzası (`scoreDelta >= 45`) yoksa tek bir sezgisel bulgu skoru `58`'in üzerine çıkaramaz; `LIKELY_AI` (varsayılan eşik `60`) için en az 2 bağımsız bulgu gerekir.
+  - Otantik kanıtlar (kamera EXIF `-24`, QuickTime cihaz etiketi `-22`, doğal mikrofon ortam gürültüsü `-18`, pragmatik kod işaretleri `-16`, BEXT `-12`) yanlış pozitifleri engeller.
+- **Proje AI-Loop düzeyi ([src/core/project-audit.ts](../src/core/project-audit.ts)):**
+  - AI dosya oranı, çok katmanlı AI yığını (`code` + `image`/`video`/`audio`/`text`), otonom/sınırsız LLM döngü kodu, LLM atlama yorumları (`... existing code`), anlamlı dosyalar arası (`>= 256 B`) FNV-1a çapraz şablon tekrarı ve ajan döngü yapılandırma dosyalarını birleştirerek `AI_LOOP_CONFIRMED`, `AI_LOOP_LIKELY`, `MIXED_AI_ASSISTED` veya `ORGANIC_PROJECT` kararını üretir.

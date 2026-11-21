@@ -9,11 +9,11 @@ description: >-
 
 # Managing AI Provenance & Generator Signatures
 
-Use this runbook when modifying `src/signatures.ts` (or authentic device lists in `src/analyzers/image.ts` / `video.ts` / `audio.ts`).
+Use this runbook when modifying `src/core/signatures.ts` (or authentic device lists in `src/features/image/analyzer.ts`, `src/features/video/analyzer.ts`, `src/features/audio/analyzer.ts`).
 
 ## Signature Rule Design Rules
 
-All rules live in `AI_SIGNATURE_RULES` in `src/signatures.ts`:
+All rules live in `AI_SIGNATURE_RULES` in `src/core/signatures.ts`:
 
 ```ts
 {

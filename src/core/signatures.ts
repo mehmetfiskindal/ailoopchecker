@@ -1,5 +1,12 @@
-import type { ForensicFinding, MediaCategory } from './types.ts'
-import { indexOfAscii, printableSlice } from './bytes.ts'
+import { Buffer } from 'node:buffer'
+import type { ForensicFinding, MediaCategory } from '../shared/types.ts'
+import {
+  addUnique,
+  extractSnippetUtf8,
+  indexOfAscii,
+  indexOfUtf8CI,
+  printableSlice
+} from '../shared/bytes.ts'
 
 export interface SignatureRule {
   id: string
@@ -11,7 +18,7 @@ export interface SignatureRule {
 }
 
 const AI_SIGNATURE_RULES: SignatureRule[] = [
-  // C2PA & IPTC Generative AI Provenance (highest authority)
+  // C2PA & IPTC Generative AI Provenance
   { id: 'iptc_trained_algo', pattern: 'trainedalgorithmicmedia', generator: 'IPTC/C2PA Trained Algorithmic Media', category: 'iptc', scoreDelta: 65, strong: true },
   { id: 'iptc_composite_algo', pattern: 'compositewithtrainedalgorithmicmedia', generator: 'IPTC/C2PA Composite AI Media', category: 'iptc', scoreDelta: 55, strong: true },
   { id: 'iptc_algo_media', pattern: 'digitalsourcetype/algorithmicmedia', generator: 'IPTC Algorithmic Media', category: 'iptc', scoreDelta: 50, strong: true },
@@ -89,7 +96,7 @@ const AI_SIGNATURE_RULES: SignatureRule[] = [
   { id: 'gen_rvc', pattern: 'rvc-voice', generator: 'RVC Voice Conversion', category: 'audio-ai', scoreDelta: 55, strong: true },
   { id: 'gen_riffusion', pattern: 'riffusion', generator: 'Riffusion', category: 'audio-ai', scoreDelta: 55, strong: true },
 
-  // Programmatic / ML pipeline indicators (soft hints)
+  // Programmatic / ML pipeline indicators
   { id: 'ml_diffusers', pattern: 'diffusers', generator: 'HuggingFace Diffusers', category: 'ml-tool', scoreDelta: 35, strong: false },
   { id: 'ml_torchaudio', pattern: 'torchaudio', generator: 'PyTorch Audio', category: 'ml-tool', scoreDelta: 25, strong: false },
   { id: 'ml_openai', pattern: 'openai', generator: 'OpenAI', category: 'ml-tool', scoreDelta: 35, strong: false }
@@ -102,15 +109,9 @@ export interface SignatureScanResult {
   hasAiProvenance: boolean
 }
 
-export function addUnique(list: string[], value: string): void {
-  for (let i = 0; i < list.length; i++) {
-    if (list[i] === value) return
-  }
-  list.push(value)
-}
-
-export function scanTextForAiSignatures(
-  textSources: string[],
+// Fast O(N) byte-level signature scanner: avoids O(N^2) string.toLowerCase() / indexOf on large C++ UTF-8 buffers.
+export function scanBytesForAiSignatures(
+  byteSources: Uint8Array[],
   mediaCategory: MediaCategory
 ): SignatureScanResult {
   const findings: ForensicFinding[] = []
@@ -118,16 +119,15 @@ export function scanTextForAiSignatures(
   const matchedIds = new Set<string>()
   let hasAiProvenance = false
 
-  for (let s = 0; s < textSources.length; s++) {
-    const raw = textSources[s]!
+  for (let s = 0; s < byteSources.length; s++) {
+    const raw = byteSources[s]!
     if (raw.length === 0) continue
-    const lower = raw.toLowerCase()
+    const scanLen = Math.min(raw.length, 32768)
 
-    // Check A1111 diffusion parameter pattern ("Steps: X, Sampler: Y, CFG scale: Z")
     if (
       !matchedIds.has('a1111_params') &&
-      lower.indexOf('steps:') >= 0 &&
-      (lower.indexOf('sampler:') >= 0 || lower.indexOf('cfg scale:') >= 0)
+      indexOfUtf8CI(raw, 'steps:', 0, scanLen) >= 0 &&
+      (indexOfUtf8CI(raw, 'sampler:', 0, scanLen) >= 0 || indexOfUtf8CI(raw, 'cfg scale:', 0, scanLen) >= 0)
     ) {
       matchedIds.add('a1111_params')
       hasAiProvenance = true
@@ -141,24 +141,21 @@ export function scanTextForAiSignatures(
         titleEn: 'Diffusion generation parameters detected',
         detailTr: 'Dosya metaverisinde Steps / Sampler / CFG scale gibi Stable Diffusion üretim parametreleri yer alıyor.',
         detailEn: 'File metadata contains Stable Diffusion generation parameters (Steps / Sampler / CFG scale).',
-        evidence: raw.slice(0, 180).replace(/\s+/g, ' ').trim()
+        evidence: extractSnippetUtf8(raw, 0, Math.min(160, scanLen))
       })
     }
 
     for (let r = 0; r < AI_SIGNATURE_RULES.length; r++) {
       const rule = AI_SIGNATURE_RULES[r]!
       if (matchedIds.has(rule.id)) continue
-      const idx = lower.indexOf(rule.pattern)
+      const idx = indexOfUtf8CI(raw, rule.pattern, 0, scanLen)
       if (idx < 0) continue
 
       matchedIds.add(rule.id)
       addUnique(generators, rule.generator)
       if (rule.strong) hasAiProvenance = true
 
-      const start = Math.max(0, idx - 24)
-      const end = Math.min(raw.length, idx + rule.pattern.length + 48)
-      const snippet = raw.slice(start, end).replace(/\s+/g, ' ').trim()
-
+      const snippet = extractSnippetUtf8(raw, idx, rule.pattern.length)
       const isC2paOrIptc = rule.category === 'c2pa' || rule.category === 'iptc'
       findings.push({
         id: `sig_${rule.id}`,
@@ -190,13 +187,24 @@ export function scanTextForAiSignatures(
   }
 }
 
+export function scanTextForAiSignatures(
+  textSources: string[],
+  mediaCategory: MediaCategory
+): SignatureScanResult {
+  const buffers: Uint8Array[] = []
+  for (let i = 0; i < textSources.length; i++) {
+    const t = textSources[i]!
+    if (t.length > 0) buffers.push(Buffer.from(t, 'utf8'))
+  }
+  return scanBytesForAiSignatures(buffers, mediaCategory)
+}
+
 export function scanBinaryForC2paAndXmp(buf: Uint8Array, mediaCategory: MediaCategory): SignatureScanResult {
   const findings: ForensicFinding[] = []
   const generators: string[] = []
   let hasC2paBox = false
   let hasAiProvenance = false
 
-  // Scan head and tail windows (up to 512 KB each) for JUMBF/C2PA and XMP markers
   const windows: Uint8Array[] = []
   const headLen = Math.min(buf.length, 524288)
   windows.push(buf.subarray(0, headLen))
@@ -205,7 +213,7 @@ export function scanBinaryForC2paAndXmp(buf: Uint8Array, mediaCategory: MediaCat
     windows.push(buf.subarray(tailStart))
   }
 
-  const extractedTexts: string[] = []
+  const extractedSlices: Uint8Array[] = []
   for (let w = 0; w < windows.length; w++) {
     const win = windows[w]!
     const jumbIdx = indexOfAscii(win, 'jumb')
@@ -214,19 +222,19 @@ export function scanBinaryForC2paAndXmp(buf: Uint8Array, mediaCategory: MediaCat
       hasC2paBox = true
       const sliceStart = Math.max(0, Math.min(jumbIdx, c2paIdx) - 32)
       const sliceEnd = Math.min(win.length, sliceStart + 16384)
-      extractedTexts.push(printableSlice(win, sliceStart, sliceEnd, 16384))
+      extractedSlices.push(win.subarray(sliceStart, sliceEnd))
     }
 
     const xmpIdx = indexOfAscii(win, '<x:xmpmeta')
     if (xmpIdx >= 0) {
       const endIdx = indexOfAscii(win, '</x:xmpmeta>', xmpIdx)
       const sliceEnd = endIdx > xmpIdx ? Math.min(win.length, endIdx + 12) : Math.min(win.length, xmpIdx + 16384)
-      extractedTexts.push(printableSlice(win, xmpIdx, sliceEnd, 16384))
+      extractedSlices.push(win.subarray(xmpIdx, sliceEnd))
     }
 
     const dstIdx = indexOfAscii(win, 'DigitalSourceType')
     if (dstIdx >= 0) {
-      extractedTexts.push(printableSlice(win, Math.max(0, dstIdx - 64), Math.min(win.length, dstIdx + 512), 1024))
+      extractedSlices.push(win.subarray(Math.max(0, dstIdx - 64), Math.min(win.length, dstIdx + 512)))
     }
   }
 
@@ -244,8 +252,8 @@ export function scanBinaryForC2paAndXmp(buf: Uint8Array, mediaCategory: MediaCat
     })
   }
 
-  if (extractedTexts.length > 0) {
-    const textScan = scanTextForAiSignatures(extractedTexts, mediaCategory)
+  if (extractedSlices.length > 0) {
+    const textScan = scanBytesForAiSignatures(extractedSlices, mediaCategory)
     for (let i = 0; i < textScan.findings.length; i++) {
       findings.push(textScan.findings[i]!)
     }
@@ -255,6 +263,7 @@ export function scanBinaryForC2paAndXmp(buf: Uint8Array, mediaCategory: MediaCat
     if (textScan.hasAiProvenance) hasAiProvenance = true
   }
 
+  void printableSlice
   return {
     findings,
     generators,

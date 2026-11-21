@@ -1,7 +1,6 @@
 import { Buffer } from 'node:buffer'
-import type { AnalyzerResult, ForensicFinding, KeyValueEntry } from '../types.ts'
-import { round2 } from '../bytes.ts'
-import { addUnique } from '../signatures.ts'
+import type { AnalyzerResult, ForensicFinding, KeyValueEntry } from '../../shared/types.ts'
+import { addUnique, extractSnippetUtf8, indexOfUtf8CI, round2 } from '../../shared/bytes.ts'
 
 interface CodeLanguageProfile {
   name: string
@@ -39,7 +38,6 @@ function getLanguageProfile(format: string): CodeLanguageProfile {
       supportsTripleQuoteDoc: false
     }
   }
-  // JS, TS, JSX, TSX, Rust, Go, Swift, Kotlin, Java, C#, C, C++, Zig, Gleam, Dart, Scala
   return {
     name: format,
     lineComment: '//',
@@ -254,11 +252,69 @@ function extractCommentText(trimmedLine: string, profile: CodeLanguageProfile): 
   return null
 }
 
+function isDigitCode(ch: number): boolean {
+  return ch >= 48 && ch <= 57
+}
+
+function isLowerLetterCode(ch: number): boolean {
+  return (ch >= 97 && ch <= 122) || ch === 231 || ch === 287 || ch === 305 || ch === 246 || ch === 351 || ch === 252
+}
+
 function isStepComment(commentLower: string): boolean {
-  if (/^step\s+\d+[:.)\-\s]/.test(commentLower)) return true
-  if (/^adım\s+\d+[:.)\-\s]/.test(commentLower)) return true
-  if (/^\d+\.\s+[a-zçğıöşü]/.test(commentLower)) return true
+  const n = commentLower.length
+  if (n < 4) return false
+  if (commentLower.startsWith('step ') || commentLower.startsWith('adım ')) {
+    let i = 5
+    while (i < n && commentLower.charCodeAt(i) === 32) i++
+    if (i < n && isDigitCode(commentLower.charCodeAt(i))) return true
+  }
+  let d = 0
+  while (d < n && d < 3 && isDigitCode(commentLower.charCodeAt(d))) d++
+  if (d > 0 && d + 2 < n && commentLower.charCodeAt(d) === 46 && commentLower.charCodeAt(d + 1) === 32) {
+    if (isLowerLetterCode(commentLower.charCodeAt(d + 2))) return true
+  }
   return false
+}
+
+function hasDecorativeEmoji(s: string): boolean {
+  const emojis = ['✅', '🚀', '⚡', '🔥', '💡', '✨', '🎯', '📌']
+  for (let i = 0; i < emojis.length; i++) {
+    if (s.indexOf(emojis[i]!) >= 0) return true
+  }
+  return false
+}
+
+function hasTicketOrIssueRef(s: string): boolean {
+  const n = Math.min(s.length, 160)
+  for (let i = 0; i < n; i++) {
+    const ch = s.charCodeAt(i)
+    if (ch === 35 && i + 2 < n && s.charCodeAt(i + 1) >= 49 && s.charCodeAt(i + 1) <= 57) {
+      let j = i + 2
+      while (j < n && isDigitCode(s.charCodeAt(j))) j++
+      if (j - i >= 3 && j - i <= 6) return true
+    }
+    if (ch === 45 && i >= 2 && i + 2 < n && isDigitCode(s.charCodeAt(i + 1))) {
+      let u = i - 1
+      while (u >= 0 && s.charCodeAt(u) >= 65 && s.charCodeAt(u) <= 90) u--
+      const upperLen = i - 1 - u
+      let d = i + 1
+      while (d < n && isDigitCode(s.charCodeAt(d))) d++
+      const digitLen = d - (i + 1)
+      if (upperLen >= 2 && upperLen <= 6 && digitLen >= 2 && digitLen <= 5) return true
+    }
+  }
+  const lower = s.toLowerCase()
+  const todoIdx = lower.indexOf('todo(')
+  if (todoIdx >= 0 && lower.indexOf(')', todoIdx + 5) > todoIdx + 5) return true
+  return false
+}
+
+function stripBlockCommentPrefix(trimmed: string): string {
+  let s = trimmed
+  if (s.startsWith('* ')) s = s.slice(2)
+  else if (s.startsWith('*')) s = s.slice(1)
+  if (s.endsWith('*/')) s = s.slice(0, s.length - 2)
+  return s.trim()
 }
 
 export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
@@ -268,25 +324,26 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
   const generatorHints: string[] = []
 
   const profile = getLanguageProfile(format)
-  const text = Buffer.from(buf).toString('utf8')
-  const lowerAll = text.toLowerCase()
-  const lines = text.split(/\r?\n/)
+  const scanLen = Math.min(buf.length, 65536)
+  const slice = buf.subarray(0, scanLen)
+  const text = Buffer.from(slice).toString('utf8')
+  const lines = text.split('\n')
 
   metadata.push({ key: 'code_language', value: profile.name })
   metadata.push({ key: 'text_encoding', value: 'UTF-8' })
 
-  let totalLines = lines.length
+  const totalLines = lines.length
   let nonEmptyLines = 0
   let codeLines = 0
   let commentLines = 0
   let docBlockCount = 0
+  let docTagCount = 0
   let inBlockComment = false
   let inTripleDoc = false
   let narrationHits = 0
   let stepCommentCount = 0
   let emDashInComments = 0
   let emojiInComments = 0
-  let trailingWsLines = 0
   let pragmaticHumanHits = 0
   let ticketRefHits = 0
   let codeLineLenSum = 0
@@ -298,16 +355,15 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
   const matchedExplicitIds = new Set<string>()
   const matchedHumanEvidence: string[] = []
 
-  for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i]!
-    if (rawLine.length > 0 && (rawLine.endsWith(' ') || rawLine.endsWith('\t'))) {
-      trailingWsLines++
-    }
-    const trimmed = rawLine.trim()
+  for (let i = 0; i < lines.length && i < 1500; i++) {
+    const trimmed = lines[i]!.trim()
     if (trimmed.length === 0) continue
     nonEmptyLines++
 
-    // Track multi-line docstrings / block comments
+    if (trimmed.indexOf('@param') >= 0 || trimmed === 'Args:' || trimmed === 'Returns:') {
+      docTagCount++
+    }
+
     let isCommentLine = false
     let commentBody = ''
 
@@ -333,7 +389,7 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
     if (!isCommentLine && profile.supportsBlockComment) {
       if (inBlockComment) {
         isCommentLine = true
-        commentBody = trimmed.replace(/^\*\s?/, '').replace(/\*\/$/, '').trim()
+        commentBody = stripBlockCommentPrefix(trimmed)
         if (trimmed.indexOf('*/') >= 0) inBlockComment = false
       } else if (trimmed.startsWith('/*')) {
         isCommentLine = true
@@ -354,10 +410,11 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
 
     if (isCommentLine) {
       commentLines++
-      const cLower = commentBody.toLowerCase()
+      const shortComment = commentBody.length > 240 ? commentBody.slice(0, 240) : commentBody
+      const cLower = shortComment.toLowerCase()
 
-      if (commentBody.indexOf('—') >= 0) emDashInComments++
-      if (/[✅🚀⚡🔥💡✨🎯📌]/.test(commentBody)) emojiInComments++
+      if (shortComment.indexOf('—') >= 0) emDashInComments++
+      if (hasDecorativeEmoji(shortComment)) emojiInComments++
 
       if (isStepComment(cLower)) {
         stepCommentCount++
@@ -368,7 +425,7 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
         if (cLower.startsWith(prefix) || cLower.indexOf(` ${prefix}`) >= 0) {
           narrationHits++
           if (matchedNarration.length < 6) {
-            addUnique(matchedNarration, commentBody.slice(0, 64))
+            addUnique(matchedNarration, shortComment.slice(0, 64))
           }
           break
         }
@@ -376,7 +433,7 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
 
       for (let o = 0; o < OMISSION_COMMENT_PATTERNS.length; o++) {
         if (cLower.indexOf(OMISSION_COMMENT_PATTERNS[o]!) >= 0) {
-          addUnique(matchedOmissions, commentBody.slice(0, 72))
+          addUnique(matchedOmissions, shortComment.slice(0, 72))
         }
       }
 
@@ -388,7 +445,7 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
         }
       }
 
-      if (/(?:todo\([a-z0-9_-]+\)|#[1-9]\d{1,5}\b|[A-Z]{2,6}-\d{2,5}\b)/.test(commentBody)) {
+      if (hasTicketOrIssueRef(shortComment)) {
         ticketRefHits++
         if (matchedHumanEvidence.length < 5) addUnique(matchedHumanEvidence, 'ticket/issue ref')
       }
@@ -396,27 +453,27 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
       codeLines++
       codeLineLenSum += trimmed.length
       codeLineLenSq += trimmed.length * trimmed.length
-      // Also check inline pragmatic markers like `// eslint-disable` or `#[allow(...)]`
-      const lLower = trimmed.toLowerCase()
-      for (let h = 0; h < PRAGMATIC_HUMAN_MARKERS.length; h++) {
-        const hm = PRAGMATIC_HUMAN_MARKERS[h]!
-        if (lLower.indexOf(hm) >= 0) {
-          pragmaticHumanHits++
-          if (matchedHumanEvidence.length < 5) addUnique(matchedHumanEvidence, hm.trim())
+      if (trimmed.length <= 240) {
+        const lLower = trimmed.toLowerCase()
+        for (let h = 0; h < PRAGMATIC_HUMAN_MARKERS.length; h++) {
+          const hm = PRAGMATIC_HUMAN_MARKERS[h]!
+          if (lLower.indexOf(hm) >= 0) {
+            pragmaticHumanHits++
+            if (matchedHumanEvidence.length < 5) addUnique(matchedHumanEvidence, hm.trim())
+          }
         }
       }
     }
   }
 
-  // Check explicit AI attribution headers/comments
+  // Pure O(N) byte-level scans across slice (zero O(N^2) toLowerCase on whole file!)
   for (let m = 0; m < EXPLICIT_CODE_AI_MARKERS.length; m++) {
     const rule = EXPLICIT_CODE_AI_MARKERS[m]!
     if (matchedExplicitIds.has(rule.id)) continue
-    const idx = lowerAll.indexOf(rule.pattern)
+    const idx = indexOfUtf8CI(slice, rule.pattern, 0, scanLen)
     if (idx < 0) continue
     matchedExplicitIds.add(rule.id)
     addUnique(generatorHints, rule.generator)
-    const snippet = text.slice(Math.max(0, idx - 16), Math.min(text.length, idx + rule.pattern.length + 40)).replace(/\s+/g, ' ').trim()
     findings.push({
       id: `sig_${rule.id}`,
       category: 'provenance',
@@ -426,34 +483,32 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
       titleEn: `Explicit AI code attribution found: ${rule.generator}`,
       detailTr: `Kaynak kod yorum veya başlığında doğrudan '${rule.pattern}' üretim beyanı yer alıyor.`,
       detailEn: `Source code comment or header explicitly declares '${rule.pattern}'.`,
-      evidence: snippet
+      evidence: extractSnippetUtf8(slice, idx, rule.pattern.length)
     })
   }
 
-  // Check tutorial/placeholder boilerplate patterns
   for (let p = 0; p < PLACEHOLDER_PATTERNS.length; p++) {
     const pat = PLACEHOLDER_PATTERNS[p]!
-    if (lowerAll.indexOf(pat) >= 0) {
+    if (indexOfUtf8CI(slice, pat, 0, scanLen) >= 0) {
       addUnique(matchedPlaceholders, pat)
     }
   }
 
-  // Detect AI-loop / autonomous LLM feedback loop patterns in source code
   const matchedLlmApis: string[] = []
   for (let i = 0; i < LLM_API_SIGNALS.length; i++) {
     const sig = LLM_API_SIGNALS[i]!
-    if (lowerAll.indexOf(sig) >= 0) addUnique(matchedLlmApis, sig)
+    if (indexOfUtf8CI(slice, sig, 0, scanLen) >= 0) addUnique(matchedLlmApis, sig)
   }
 
   const matchedLoops: string[] = []
   for (let i = 0; i < LOOP_CONSTRUCT_SIGNALS.length; i++) {
     const sig = LOOP_CONSTRUCT_SIGNALS[i]!
-    if (lowerAll.indexOf(sig) >= 0) addUnique(matchedLoops, sig)
+    if (indexOfUtf8CI(slice, sig, 0, scanLen) >= 0) addUnique(matchedLoops, sig)
   }
 
   let hasLoopGuard = false
   for (let i = 0; i < LOOP_GUARD_SIGNALS.length; i++) {
-    if (lowerAll.indexOf(LOOP_GUARD_SIGNALS[i]!) >= 0) {
+    if (indexOfUtf8CI(slice, LOOP_GUARD_SIGNALS[i]!, 0, scanLen) >= 0) {
       hasLoopGuard = true
       break
     }
@@ -462,22 +517,18 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
   const matchedSelfFeedback: string[] = []
   for (let i = 0; i < SELF_FEEDBACK_LOOP_SIGNALS.length; i++) {
     const sig = SELF_FEEDBACK_LOOP_SIGNALS[i]!
-    if (lowerAll.indexOf(sig) >= 0) addUnique(matchedSelfFeedback, sig)
+    if (indexOfUtf8CI(slice, sig, 0, scanLen) >= 0) addUnique(matchedSelfFeedback, sig)
   }
 
   let stubCount = 0
   for (let i = 0; i < STUB_PLACEHOLDER_PATTERNS.length; i++) {
     const pat = STUB_PLACEHOLDER_PATTERNS[i]!
-    let idx = lowerAll.indexOf(pat)
-    while (idx >= 0) {
+    let idx = indexOfUtf8CI(slice, pat, 0, scanLen)
+    while (idx >= 0 && stubCount < 16) {
       stubCount++
-      idx = lowerAll.indexOf(pat, idx + pat.length)
+      idx = indexOfUtf8CI(slice, pat, idx + pat.length, scanLen)
     }
   }
-
-  // Count textbook JSDoc/docstring tags (@param/@returns or Args:/Returns:)
-  const paramMatches = text.match(/@param\b|\bArgs:\s*$|^\s*Returns:\s*$/gm)
-  const docTagCount = paramMatches ? paramMatches.length : 0
 
   const commentRatio = nonEmptyLines > 0 ? commentLines / nonEmptyLines : 0
   const narrationPer100Code = codeLines > 0 ? (narrationHits / codeLines) * 100 : 0
@@ -555,7 +606,6 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
     })
   }
 
-  // Forensic Scoring Rules for Source Code
   if (matchedOmissions.length > 0) {
     findings.push({
       id: 'code_llm_omission_comment',
@@ -653,7 +703,6 @@ export function analyzeCode(buf: Uint8Array, format: string): AnalyzerResult {
     })
   }
 
-  // Authentic engineering signals (negative weight to protect real human codebases)
   if (pragmaticHumanHits + ticketRefHits >= 2 && matchedOmissions.length === 0 && stepCommentCount === 0) {
     findings.push({
       id: 'code_pragmatic_engineering_markers',

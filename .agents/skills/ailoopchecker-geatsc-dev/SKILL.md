@@ -22,8 +22,9 @@ Read [references/geatsc-constraints.md](./references/geatsc-constraints.md) for 
    - Never import `node:zlib` (triggers `libbrotlidec` linkage and CVE version gate); use pure TypeScript `inflateZlib` in `src/inflate.ts`.
    - Never import `node:http`, `node:https`, `node:net`, `node:dns`, or `node:child_process` (violates offline/read-only privacy model and/or unimplemented in `node-compat`).
    - Never use `fs.readFileSync` or `fs.readdirSync` (not implemented in `node-compat`).
-5. **No multi-arg `JSON.stringify(obj, null, 2)` on typed records:** `geatsc` refuses replacer/pretty-print over static record carriers. Extend the deterministic serializer in `src/report.ts` instead.
-6. **Keep `processEnv` and `URL` guard in `src/cli.ts`:** Read env vars via `import { env as processEnv } from 'node:process'` (not global `process.env`) and keep the `URL` reference so `node-compat` mounts `whatwg-url.ts` for `node:fs` signatures.
+5. **No multi-arg `JSON.stringify(obj, null, 2)` on typed records:** `geatsc` refuses replacer/pretty-print over static record carriers. Extend the deterministic serializer in `src/product/report.ts` instead.
+6. **Keep `processEnv` and `URL` guard in `src/product/cli.ts`:** Read env vars via `import { env as processEnv } from 'node:process'` (not global `process.env`) and keep the `URL` reference so `node-compat` mounts `whatwg-url.ts` for `node:fs` signatures.
+7. **Avoid `O(N²)` UTF-8 string loops on large files:** Never run `charCodeAt(i)`, `toLowerCase()`, or complex `RegExp` over multi-KB buffers in hot paths; use `Uint8Array` byte loops and `indexOfUtf8CI` in `src/shared/bytes.ts`.
 
 ## Standard Edit → Build → Parity Verification Loop
 
