@@ -1,4 +1,4 @@
-import { promises as fsPromises } from 'node:fs'
+import { existsSync, promises as fsPromises, statSync } from 'node:fs'
 import { env as processEnv } from 'node:process'
 import type { AnalysisReport, CliOptions, OutputLang } from './types.ts'
 import { analyzeFile } from './analyzer.ts'
@@ -77,6 +77,7 @@ function parseArgs(argv: string[]): CliOptions {
   const opts: CliOptions = {
     files: [],
     projectMode: false,
+    projectName: '',
     fileListPath: '',
     json: false,
     verbose: false,
@@ -92,7 +93,10 @@ function parseArgs(argv: string[]): CliOptions {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!
     if (arg === '--project' || arg === '-p') opts.projectMode = true
-    else if (arg === '--file-list' && i + 1 < argv.length) {
+    else if (arg === '--project-name' && i + 1 < argv.length) {
+      opts.projectName = argv[++i]!
+      opts.projectMode = true
+    } else if (arg === '--file-list' && i + 1 < argv.length) {
       opts.fileListPath = argv[++i]!
       opts.projectMode = true
     } else if (arg === '--json') opts.json = true
@@ -156,8 +160,26 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
+  // Catch direct directory arguments when invoked without run-cli.sh / scan-project.sh
+  for (let i = 0; i < opts.files.length; i++) {
+    const p = opts.files[i]!
+    if (existsSync(p) && statSync(p).isDirectory()) {
+      console.error(
+        opts.lang === 'en'
+          ? `Directory argument detected: ${p}\nUse: npm start ${p}   or   ./scripts/scan-project.sh ${p}`
+          : `Dizin yolu algılandı: ${p}\nTüm proje dizinini taramak için şunu çalıştırın:\n  npm start ${p}\nveya:\n  ./scripts/scan-project.sh ${p}`
+      )
+      process.exit(1)
+    }
+  }
+
   if (opts.projectMode) {
-    const projectName = opts.fileListPath.length > 0 ? opts.fileListPath : 'workspace-project'
+    const projectName =
+      opts.projectName.length > 0
+        ? opts.projectName
+        : opts.fileListPath.length > 0
+          ? opts.fileListPath
+          : 'workspace-project'
     const projectReport = await auditProjectFiles(
       projectName,
       opts.files,

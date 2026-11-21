@@ -79,6 +79,7 @@ export interface ProjectAuditReport {
 export interface CliOptions {
   files: string[]
   projectMode: boolean
+  projectName: string
   fileListPath: string
   json: boolean
   verbose: boolean
