@@ -21,6 +21,7 @@ Supported media:
   Images / Visual Products : PNG, JPEG, WebP, BMP, GIF, TIFF, AVIF/HEIC
   Videos                   : MP4, MOV, WebM, MKV, AVI
   Audio Recordings         : WAV (with native FFT/STFT DSP), MP3, FLAC, OGG, Opus, M4A
+  Source Code              : TS, JS, Python, Rust, Go, Swift, Kotlin, Java, C#, C/C++, Zig, Dart, Ruby, PHP, Elixir, SQL, Shell
   Text / Product Copy      : TXT, MD, HTML, JSON (TR/EN stylometry)
 
 Options:
@@ -45,6 +46,7 @@ Desteklenen medya türleri:
   Görsel / Ürünler : PNG (tam IDAT piksel analizi), JPEG (EXIF/XMP/DQT), WebP, BMP, GIF, TIFF
   Videolar         : MP4, MOV (atom/kare/GOP/4k+1 analiz), WebM, MKV, AVI
   Ses Kayıtları    : WAV (native FFT/STFT vocoder & sessizlik DSP), MP3, FLAC, OGG, Opus, M4A
+  Kaynak Kod       : TS, JS, Python, Rust, Go, Swift, Kotlin, Java, C#, C/C++, Zig, Dart, Ruby, PHP, Elixir, SQL, Shell
   Metin / Ürün     : TXT, MD, HTML, JSON (Türkçe & İngilizce stilometri)
 
 Seçenekler:

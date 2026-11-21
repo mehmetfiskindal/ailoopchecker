@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "geatsc ile native C++ ikili dosyaya derlenen AI medya (görsel/ürün, video, ses, metin) adli tespit CLI uygulaması",
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "bin": {
     "ailoopchecker": "./src/cli.ts"
   },

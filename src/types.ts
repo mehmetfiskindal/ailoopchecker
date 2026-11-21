@@ -1,4 +1,4 @@
-export type MediaCategory = 'image' | 'video' | 'audio' | 'text' | 'unknown'
+export type MediaCategory = 'image' | 'video' | 'audio' | 'code' | 'text' | 'unknown'
 
 export type Verdict = 'CONFIRMED_AI' | 'LIKELY_AI' | 'INCONCLUSIVE' | 'LIKELY_AUTHENTIC'
 

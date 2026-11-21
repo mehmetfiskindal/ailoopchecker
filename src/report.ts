@@ -57,12 +57,14 @@ function categoryLabel(cat: string, lang: OutputLang): string {
     if (cat === 'image') return 'Image / Visual Product'
     if (cat === 'video') return 'Video'
     if (cat === 'audio') return 'Audio Recording'
+    if (cat === 'code') return 'Source Code'
     if (cat === 'text') return 'Text / Product Copy'
     return 'Unknown'
   }
   if (cat === 'image') return 'Görsel / Ürün'
   if (cat === 'video') return 'Video'
   if (cat === 'audio') return 'Ses Kaydı'
+  if (cat === 'code') return 'Kaynak Kod'
   if (cat === 'text') return 'Metin / Ürün İçeriği'
   return 'Bilinmeyen'
 }

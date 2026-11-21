@@ -6,6 +6,7 @@ import { detectMagicFormat, round2 } from './bytes.ts'
 import { analyzeImage } from './analyzers/image.ts'
 import { analyzeVideo } from './analyzers/video.ts'
 import { analyzeAudio } from './analyzers/audio.ts'
+import { analyzeCode } from './analyzers/code.ts'
 import { analyzeText } from './analyzers/text.ts'
 import { evaluateFindings } from './scoring.ts'
 
@@ -28,6 +29,8 @@ export function analyzeBuffer(
     result = analyzeVideo(buf, magic.format)
   } else if (magic.category === 'audio') {
     result = analyzeAudio(buf, magic.format)
+  } else if (magic.category === 'code') {
+    result = analyzeCode(buf, magic.format)
   } else if (magic.category === 'text') {
     result = analyzeText(buf, magic.format)
   } else {

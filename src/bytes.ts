@@ -294,6 +294,12 @@ export function detectMagicFormat(buf: Uint8Array, fileExtLower: string): MagicD
     return { category: 'audio', format: 'MP3' }
   }
 
+  // Source code languages (modern JS/TS, Python, Rust, Go, Swift, Kotlin, Java, C#, C/C++, Zig, etc.)
+  const codeFormat = detectCodeFormat(buf, fileExtLower)
+  if (codeFormat.length > 0) {
+    return { category: 'code', format: codeFormat }
+  }
+
   // Extension fallback for text/documents
   if (
     fileExtLower === '.txt' ||
@@ -310,4 +316,42 @@ export function detectMagicFormat(buf: Uint8Array, fileExtLower: string): MagicD
   }
 
   return { category: 'unknown', format: 'BINARY' }
+}
+
+function detectCodeFormat(buf: Uint8Array, ext: string): string {
+  if (ext === '.ts' || ext === '.mts' || ext === '.cts' || ext === '.tsx') return 'TYPESCRIPT'
+  if (ext === '.js' || ext === '.mjs' || ext === '.cjs' || ext === '.jsx') return 'JAVASCRIPT'
+  if (ext === '.py' || ext === '.pyi') return 'PYTHON'
+  if (ext === '.rs') return 'RUST'
+  if (ext === '.go') return 'GO'
+  if (ext === '.swift') return 'SWIFT'
+  if (ext === '.kt' || ext === '.kts') return 'KOTLIN'
+  if (ext === '.java') return 'JAVA'
+  if (ext === '.cs') return 'CSHARP'
+  if (ext === '.cpp' || ext === '.cc' || ext === '.cxx' || ext === '.hpp' || ext === '.hh') return 'CPP'
+  if (ext === '.c' || ext === '.h') return 'C'
+  if (ext === '.zig') return 'ZIG'
+  if (ext === '.mojo') return 'MOJO'
+  if (ext === '.gleam') return 'GLEAM'
+  if (ext === '.ex' || ext === '.exs') return 'ELIXIR'
+  if (ext === '.rb') return 'RUBY'
+  if (ext === '.php') return 'PHP'
+  if (ext === '.dart') return 'DART'
+  if (ext === '.scala') return 'SCALA'
+  if (ext === '.sql') return 'SQL'
+  if (ext === '.sh' || ext === '.bash' || ext === '.zsh') return 'SHELL'
+
+  // Shebang detection for extensionless scripts
+  if (buf.length >= 10 && buf[0] === 0x23 && buf[1] === 0x21) {
+    const firstLine = printableSlice(buf, 0, Math.min(buf.length, 128), 128).split('\n')[0] ?? ''
+    const lower = firstLine.toLowerCase()
+    if (lower.indexOf('python') >= 0) return 'PYTHON'
+    if (lower.indexOf('node') >= 0 || lower.indexOf('bun') >= 0 || lower.indexOf('deno') >= 0 || lower.indexOf('tsx') >= 0) {
+      return 'JAVASCRIPT'
+    }
+    if (lower.indexOf('ruby') >= 0) return 'RUBY'
+    if (lower.indexOf('php') >= 0) return 'PHP'
+    if (lower.indexOf('bash') >= 0 || lower.indexOf('/sh') >= 0 || lower.indexOf('zsh') >= 0) return 'SHELL'
+  }
+  return ''
 }

@@ -34,6 +34,12 @@ Bu rehber, `ailoopchecker` raporlarındaki kararları, skorları, adli metrikler
 - `audio_sterile_silence_ratio` vs `audio_room_tone_ratio`: Gerçek mikrofon kayıtlarında konuşma aralarında `-68` ile `-36 dBFS` arasında sürekli ortam gürültüsü bulunur; sentetik TTS kayıtlarında aralıklar `-82 dBFS` altı dijital sıfıra düşer.
 - `audio_vocoder_comb_peak`: 3–10 kHz bandındaki periyodik tarak (comb) otokorelasyonu.
 
+### Kaynak Kod (`TS`, `JS`, `Python`, `Rust`, `Go`, `Swift`, `Kotlin`, `Java`, `C#`, `C/C++`, `Zig`, `Dart`, `Ruby`, `PHP`, `Elixir`, `SQL`, `Shell`)
+- `code_omission_comments`: LLM sohbet/editör çıktılarından kalan `// ... existing code ...` / `# ... rest of implementation` atlama yorumları.
+- `code_step_comments` & `code_narration_hits`: `Step 1 / 1. ...` numaralı adım anlatımları ve açık kod satırlarını tekrarlayan `"Initialize / Validate / Check if / Return the"` yoğunluğu.
+- `code_comment_emdash_emoji`: Yorum satırlarında uzun tire (`—`) ve dekoratif emoji (`✅`, `🚀`) kullanımı.
+- `code_pragmatic_human_markers`: `FIXME`, ticket/issue referansları (`#418`, `JIRA-123`) ve pragmatik linter/derleyici baskılamaları (`@ts-expect-error`, `#[allow(...)]`, `//nolint`) otantik insan mühendisliği lehine puan düşürür.
+
 ### Metin / Ürün Açıklamaları (`TXT`, `MD`, `HTML`, `JSON`)
 - `text_ai_phrase_hits`: Türkçe ve İngilizce LLM klişe/geçiş ifadelerinin sayısı.
 - `text_burstiness_cv`: Cümle uzunluğu varyansı; `< 0.24` aşırı tekdüze LLM ritmine, `>= 0.45` doğal insan yazım ritmine işaret eder.

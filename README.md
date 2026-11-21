@@ -18,6 +18,10 @@
   - Sinir vocoder (HiFi-GAN / EnCodec / TTS) keskin yüksek frekans kesilmesi (~8 / ~11 / ~12 kHz brickwall) tespiti
   - Dijital-sıfır sessizlik tabanı vs. doğal mikrofon/oda gürültüsü (`room tone`) ayrımı ve yüksek bant tarak (comb) periyodikliği
   - ID3v2/ID3v1, FLAC Vorbis Comment, BEXT ve ElevenLabs / Suno / Udio / XTTS / MusicGen / Bark imza taraması
+- **Kaynak Kod Tespiti (Modern Diller):** `TypeScript` (`.ts`/`.tsx`/`.mts`), `JavaScript` (`.js`/`.jsx`/`.mjs`/`.cjs`), `Python`, `Rust`, `Go`, `Swift`, `Kotlin`, `Java`, `C#`, `C/C++`, `Zig`, `Mojo`, `Gleam`, `Elixir`, `Ruby`, `PHP`, `Dart`, `Scala`, `SQL`, `Shell` (+ shebang tanıma):
+  - Açık AI araç imzaları (Claude, ChatGPT, Copilot, Cursor, Gemini, Windsurf, Devin, DeepSeek), LLM atlama yorumları (`... existing code`, `... rest of implementation`), numaralı adım anlatımları (`Step 1 / 1.`), satır-satır anlatım yoğunluğu, yorum içi uzun tire/emoji tipografisi ve şablon dokümantasyon analizi
+  - Gerçek insan mühendisliği izleri (`FIXME`, ticket/PR referansları, linter/derleyici baskılamaları, sade anlatımsız stil) için yanlış pozitif koruması
+- **JS/TS Kütüphane (SDK) Desteği:** `import { analyzeFile, analyzeBuffer } from 'ailoopchecker'` (`package.json` `exports` -> `src/index.ts`)
 - **Metin / Ürün İçeriği Tespiti (`TXT`, `MD`, `HTML`, `JSON`):**
   - Türkçe & İngilizce LLM kalıp ifade yoğunluğu, cümle uzunluğu değişkenliği (*burstiness*) ve şablon biçimlendirme analizi
 
@@ -65,4 +69,5 @@ node src/cli.ts --self-test
 - **Davranış Kuralları:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - **Sürüm Geçmişi:** [CHANGELOG.md](CHANGELOG.md)
 - **Lisans:** [Apache-2.0](LICENSE)
+- **AI Ajan Geliştirme Yetenekleri (Skills):** `.agents/skills/` (`ailoopchecker-geatsc-dev`, `ailoopchecker-forensic-analyzers`, `ailoopchecker-signatures`, `ailoopchecker-cli-audit`)
 
