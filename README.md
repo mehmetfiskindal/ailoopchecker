@@ -41,8 +41,16 @@ Bu komut `geatsc` ile `src/cli.ts` kaynağını C++'a derler ve `./dist/ailoopch
 # Yerleşik sentetik adli test paketini çalıştır
 ./dist/ailoopchecker --self-test
 
-# Tek veya çoklu dosya analizi (görsel, video, ses, metin)
-./dist/ailoopchecker urun.png reklam.mp4 ses_kaydi.wav aciklama.md
+# Tek veya çoklu dosya analizi (görsel, video, ses, kod, metin)
+./dist/ailoopchecker urun.png reklam.mp4 ses_kaydi.wav app.ts aciklama.md
+
+# Tüm bir projeyi AI-Loop denetimi için tara (önerilen tek komut)
+./scripts/scan-project.sh /yol/proje_dizini
+./scripts/scan-project.sh /yol/proje_dizini --json --strict
+
+# Doğrudan proje modu (dosya listesi veya glob ile)
+./dist/ailoopchecker --project src/*.ts README.md assets/*.png
+./dist/ailoopchecker --project --file-list dosyalar.txt --strict
 
 # Ayrıntılı adli rapor (metaveri, DSP/piksel metrikleri, SHA-256)
 ./dist/ailoopchecker -v ses_kaydi.wav

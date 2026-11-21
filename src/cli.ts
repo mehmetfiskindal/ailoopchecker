@@ -1,7 +1,14 @@
+import { promises as fsPromises } from 'node:fs'
 import { env as processEnv } from 'node:process'
 import type { AnalysisReport, CliOptions, OutputLang } from './types.ts'
 import { analyzeFile } from './analyzer.ts'
-import { formatReportsJson, formatReportText } from './report.ts'
+import { auditProjectFiles } from './project-audit.ts'
+import {
+  formatProjectReportJson,
+  formatProjectReportText,
+  formatReportsJson,
+  formatReportText
+} from './report.ts'
 import { runSelfTests } from './selftest.ts'
 
 // Ensure node-compat's global URL provider is included for node:fs signatures
@@ -25,10 +32,12 @@ Supported media:
   Text / Product Copy      : TXT, MD, HTML, JSON (TR/EN stylometry)
 
 Options:
+  -p, --project       Aggregate files into a Project-Level AI-Loop audit report
+  --file-list <file>  Read newline-delimited project file paths from a manifest file
   --json              Emit machine-readable JSON output
   -v, --verbose       Show full forensic evidence, metadata, DSP metrics, and SHA-256
-  --strict            Exit with code 2 if any file is flagged as AI-generated
-  --threshold <0-100> Score threshold for LIKELY_AI (default: 60)
+  --strict            Exit with code 2 if AI / AI-Loop is detected
+  --threshold <0-100> Score threshold for LIKELY_AI / AI_LOOP_LIKELY (default: 60)
   --lang <tr|en>      Output language (default: tr)
   --no-color          Disable ANSI colors
   --self-test         Run built-in synthetic forensic test suite
@@ -37,10 +46,11 @@ Options:
     return
   }
 
-  console.log(`ailoopchecker v${VERSION} — geatsc Native AI Medya Adli Tespit CLI
+  console.log(`ailoopchecker v${VERSION} — geatsc Native AI Medya & Proje AI-Loop Adli Tespit CLI
 
 Kullanım:
   ailoopchecker <dosya1> [dosya2 ...] [seçenekler]
+  ailoopchecker --project --file-list <dosya_listesi.txt> [seçenekler]
 
 Desteklenen medya türleri:
   Görsel / Ürünler : PNG (tam IDAT piksel analizi), JPEG (EXIF/XMP/DQT), WebP, BMP, GIF, TIFF
@@ -50,13 +60,15 @@ Desteklenen medya türleri:
   Metin / Ürün     : TXT, MD, HTML, JSON (Türkçe & İngilizce stilometri)
 
 Seçenekler:
+  -p, --project       Dosyaları birleştirerek Proje Düzeyi AI-Loop denetim raporu üretir
+  --file-list <dosya> Satır bazlı dosya yolu listesinden proje tarar
   --json              Makine tarafından okunabilir JSON çıktısı üretir
   -v, --verbose       Tüm adli kanıtları, metaverileri, DSP metriklerini ve SHA-256 özetini gösterir
-  --strict            AI tespit edilen dosya varsa çıkış kodu 2 ile döner (CI/otomasyon için)
-  --threshold <0-100> LIKELY_AI karar eşiği (varsayılan: 60)
+  --strict            AI veya AI-Loop tespit edilirse çıkış kodu 2 ile döner (CI/otomasyon için)
+  --threshold <0-100> LIKELY_AI / AI_LOOP_LIKELY karar eşiği (varsayılan: 60)
   --lang <tr|en>      Çıktı dili (varsayılan: tr)
   --no-color          ANSI renklerini kapatır
-  --self-test         Yerleşik sentetik görsel/video/ses/metin test paketini çalıştırır
+  --self-test         Yerleşik sentetik dosya + proje AI-Loop test paketini çalıştırır
   -h, --help          Bu yardım metnini gösterir
   -V, --version       Sürüm bilgisini gösterir`)
 }
@@ -64,6 +76,8 @@ Seçenekler:
 function parseArgs(argv: string[]): CliOptions {
   const opts: CliOptions = {
     files: [],
+    projectMode: false,
+    fileListPath: '',
     json: false,
     verbose: false,
     strict: false,
@@ -77,7 +91,11 @@ function parseArgs(argv: string[]): CliOptions {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!
-    if (arg === '--json') opts.json = true
+    if (arg === '--project' || arg === '-p') opts.projectMode = true
+    else if (arg === '--file-list' && i + 1 < argv.length) {
+      opts.fileListPath = argv[++i]!
+      opts.projectMode = true
+    } else if (arg === '--json') opts.json = true
     else if (arg === '--verbose' || arg === '-v') opts.verbose = true
     else if (arg === '--strict') opts.strict = true
     else if (arg === '--no-color') opts.noColor = true
@@ -124,9 +142,50 @@ async function main(): Promise<void> {
     process.exit(code)
   }
 
+  if (opts.fileListPath.length > 0) {
+    const rawList = await fsPromises.readFile(opts.fileListPath, 'utf8')
+    const lines = rawList.split(/\r?\n/)
+    for (let i = 0; i < lines.length; i++) {
+      const p = lines[i]!.trim()
+      if (p.length > 0 && !p.startsWith('#')) opts.files.push(p)
+    }
+  }
+
   if (opts.files.length === 0) {
     printHelp(opts.lang)
     process.exit(1)
+  }
+
+  if (opts.projectMode) {
+    const projectName = opts.fileListPath.length > 0 ? opts.fileListPath : 'workspace-project'
+    const projectReport = await auditProjectFiles(
+      projectName,
+      opts.files,
+      opts.threshold,
+      async (path: string): Promise<Uint8Array | null> => {
+        try {
+          return await fsPromises.readFile(path)
+        } catch {
+          return null
+        }
+      }
+    )
+
+    if (opts.json) {
+      console.log(formatProjectReportJson(projectReport))
+    } else {
+      console.log(formatProjectReportText(projectReport, opts.lang, opts.verbose, useColor))
+    }
+
+    if (projectReport.errorFiles > 0 && projectReport.analyzedFiles === 0) process.exit(1)
+    if (
+      opts.strict &&
+      (projectReport.projectVerdict === 'AI_LOOP_CONFIRMED' ||
+        projectReport.projectVerdict === 'AI_LOOP_LIKELY')
+    ) {
+      process.exit(2)
+    }
+    return
   }
 
   const reports: AnalysisReport[] = []

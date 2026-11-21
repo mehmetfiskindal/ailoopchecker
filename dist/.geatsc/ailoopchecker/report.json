@@ -1,5 +1,5 @@
 {
-  "stage": "link",
+  "stage": "compile",
   "threw": null,
   "compilerInputs": {
     "compilerRoot": "/home/mehmetfiskindal/node_modules/@geastack/compiler",
@@ -35,42 +35,5 @@
     ],
     "runtimeHash": "3f1541c49d73bc0eb8598a5ea3610508659740c8b3111215470323f8157828c1"
   },
-  "packageSources": [],
-  "projectFile": "/home/mehmetfiskindal/developer/ailoopchecker/dist/.geatsc/ailoopchecker/tsconfig.json",
-  "compileMs": 75079,
-  "operations": 34239,
-  "selected": 33130,
-  "boxed": 583,
-  "unresolved": 0,
-  "violations": 0,
-  "missingRows": 0,
-  "missingPredicates": [],
-  "certificate": "b0241731f34c7bd304dc3334b771cad9115dddb442fecae34d0e0b17f83e629d",
-  "loweringBlockers": [],
-  "loweringBlockerLocations": [],
-  "abiBlockers": [],
-  "emissionRefusals": [],
-  "roots": [],
-  "checkerErrors": [],
-  "withheld": [],
-  "diagnostics": [],
-  "sourcePreparations": [],
-  "emittedLines": 30642,
-  "emittedUnits": 1,
-  "layout": "single",
-  "emitted": true,
-  "units": [
-    {
-      "role": "unit",
-      "fileName": "ailoopchecker.cpp",
-      "sourceFile": null
-    }
-  ],
-  "generatedFiles": [
-    "ailoopchecker.cpp"
-  ],
-  "linkMs": 94936,
-  "linked": true,
-  "exe": "/home/mehmetfiskindal/developer/ailoopchecker/dist/ailoopchecker",
-  "linkStderr": "gisterBufferBrand() {\n      |                                 ^\n/home/mehmetfiskindal/node_modules/@geastack/node-compat/runtime/node/gea_node_buffer.hpp:353:31: note: previous declaration of ‘void gea::node::buffer::detail::registerBufferBrand()’ here\n  353 | [[gnu::noinline]] inline void registerBufferBrand();\n      |                               ^~~~~~~~~~~~~~~~~~~\nlto-wrapper: warning: using serial compilation of 63 LTRANS jobs\nlto-wrapper: note: see the ‘-flto’ option documentation for more information\nIn function ‘memcpy’,\n    inlined from ‘copyPieceBytes’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1143:16,\n    inlined from ‘writePiece’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1313:17,\n    inlined from ‘fillTypedPieces’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1318:24,\n    inlined from ‘operator()’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1341:28,\n    inlined from ‘__resize_and_overwrite’ at /usr/include/c++/15/bits/basic_string.tcc:633:33,\n    inlined from ‘overwriteString’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1203:48,\n    inlined from ‘concatStringsInto’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1340:26,\n    inlined from ‘gea_body_fn_decl_f5_3050_stable_borrow’ at /home/mehmetfiskindal/developer/ailoopchecker/dist/.geatsc/ailoopchecker/ailoopchecker.cpp:20742:23:\n/usr/include/x86_64-linux-gnu/bits/string_fortified.h:29:33: warning: ‘__builtin_memcpy’ writing 23 bytes into a region of size 16 overflows the destination [-Wstringop-overflow=]\n   29 |   return __builtin___memcpy_chk (__dest, __src, __len,\n      |                                 ^\n/home/mehmetfiskindal/developer/ailoopchecker/dist/.geatsc/ailoopchecker/ailoopchecker.cpp: In function ‘gea_body_fn_decl_f5_3050_stable_borrow’:\n/home/mehmetfiskindal/developer/ailoopchecker/dist/.geatsc/ailoopchecker/ailoopchecker.cpp:20736:13: note: at offset 16 into destination object ‘v79’ of size 32\n20736 | std::string v79;\n      |             ^\nIn function ‘memcpy’,\n    inlined from ‘copyPieceBytes’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1143:16,\n    inlined from ‘writePiece’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1313:17,\n    inlined from ‘fillTypedPieces’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1318:24,\n    inlined from ‘operator()’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1341:28,\n    inlined from ‘__resize_and_overwrite’ at /usr/include/c++/15/bits/basic_string.tcc:633:33,\n    inlined from ‘overwriteString’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1203:48,\n    inlined from ‘concatStringsInto’ at /home/mehmetfiskindal/node_modules/@geastack/compiler/src/targets/cpp/runtime/gea_runtime.h:1340:26,\n    inlined from ‘gea_body_fn_decl_f5_3050_stable_borrow’ at /home/mehmetfiskindal/developer/ailoopchecker/dist/.geatsc/ailoopchecker/ailoopchecker.cpp:20741:23:\n/usr/include/x86_64-linux-gnu/bits/string_fortified.h:29:33: warning: ‘__builtin_memcpy’ writing 21 bytes into a region of size 16 overflows the destination [-Wstringop-overflow=]\n   29 |   return __builtin___memcpy_chk (__dest, __src, __len,\n      |                                 ^\n/home/mehmetfiskindal/developer/ailoopchecker/dist/.geatsc/ailoopchecker/ailoopchecker.cpp: In function ‘gea_body_fn_decl_f5_3050_stable_borrow’:\n/home/mehmetfiskindal/developer/ailoopchecker/dist/.geatsc/ailoopchecker/ailoopchecker.cpp:20735:13: note: at offset 16 into destination object ‘v77’ of size 32\n20735 | std::string v77;\n      |             ^\n"
+  "packageSources": []
 }

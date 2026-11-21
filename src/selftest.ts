@@ -1,8 +1,9 @@
 import { Buffer } from 'node:buffer'
 import { zlibWrapUncompressed } from './inflate.ts'
-import type { AnalysisReport, OutputLang, Verdict } from './types.ts'
+import type { AnalysisReport, OutputLang, ProjectVerdict, Verdict } from './types.ts'
 import { analyzeBuffer } from './analyzer.ts'
-import { formatReportText } from './report.ts'
+import { auditProjectBuffers } from './project-audit.ts'
+import { formatProjectReportText, formatReportText } from './report.ts'
 
 interface SelfTestCase {
   name: string
@@ -419,6 +420,28 @@ function buildAuthenticHumanTsCode(): Uint8Array {
   return Buffer.from(src, 'utf8')
 }
 
+function buildUnboundedAiLoopAgentTs(): Uint8Array {
+  const src = [
+    'import OpenAI from "openai"',
+    'const client = new OpenAI({ apiKey: "YOUR_API_KEY" })',
+    '// Step 1: Initialize autonomous ralph_loop feedback runner',
+    'export async function runRalphLoop(task: string): Promise<void> {',
+    '  let prev_output = task',
+    '  // Step 2: Run unbounded self_critique agent loop',
+    '  while (true) {',
+    '    const res = await client.chat.completions.create({',
+    '      model: "gpt-4o",',
+    '      messages: [{ role: "user", content: prev_output }]',
+    '    })',
+    '    // Step 3: Refine prompt using previous_output',
+    '    prev_output = res.choices[0]?.message?.content ?? ""',
+    '    // ... existing code ...',
+    '  }',
+    '}'
+  ].join('\n')
+  return Buffer.from(src, 'utf8')
+}
+
 export function runSelfTests(lang: OutputLang, verbose: boolean, useColor: boolean): number {
   const cases: SelfTestCase[] = [
     {
@@ -484,6 +507,7 @@ export function runSelfTests(lang: OutputLang, verbose: boolean, useColor: boole
   ]
 
   let passed = 0
+  let total = cases.length
   for (let i = 0; i < cases.length; i++) {
     const tc = cases[i]!
     const report: AnalysisReport = analyzeBuffer(tc.data, tc.filePath, 60)
@@ -499,6 +523,56 @@ export function runSelfTests(lang: OutputLang, verbose: boolean, useColor: boole
     }
   }
 
-  console.log(`\nSelf-test summary: ${passed}/${cases.length} passed.`)
-  return passed === cases.length ? 0 : 1
+  // Project-level AI-Loop audit tests
+  const projectTests: {
+    name: string
+    projectName: string
+    files: { filePath: string; data: Uint8Array }[]
+    expected: ProjectVerdict[]
+  }[] = [
+    {
+      name: 'AI-Loop Project (unbounded LLM loop + AI TS/Py + AI PNG + AI copy + ralph-loop.sh)',
+      projectName: 'synthetic-ailoop-repo',
+      files: [
+        { filePath: 'src/agent_loop.ts', data: buildUnboundedAiLoopAgentTs() },
+        { filePath: 'src/service.ts', data: buildAiTypeScriptCode() },
+        { filePath: 'worker/pricing.py', data: buildAiPythonCode() },
+        { filePath: 'assets/product.png', data: buildAiTaggedPng() },
+        { filePath: 'README.md', data: buildAiProductCopyTr() },
+        { filePath: 'ralph-loop.sh', data: Buffer.from('#!/usr/bin/env bash\nwhile true; do claude -p "fix"; done\n') }
+      ],
+      expected: ['AI_LOOP_CONFIRMED']
+    },
+    {
+      name: 'Organic Human Project (human TS + Sony camera JPEG + real mic WAV)',
+      projectName: 'synthetic-organic-repo',
+      files: [
+        { filePath: 'src/ring_queue.ts', data: buildAuthenticHumanTsCode() },
+        { filePath: 'assets/photo.jpg', data: buildAuthenticCameraJpeg() },
+        { filePath: 'audio/recording.wav', data: buildAuthenticMicWav() }
+      ],
+      expected: ['ORGANIC_PROJECT']
+    }
+  ]
+
+  total += projectTests.length
+  for (let i = 0; i < projectTests.length; i++) {
+    const pt = projectTests[i]!
+    const proj = auditProjectBuffers(pt.projectName, pt.files, 60)
+    let ok = false
+    for (let j = 0; j < pt.expected.length; j++) {
+      if (pt.expected[j] === proj.projectVerdict) ok = true
+    }
+    if (ok) passed++
+    const status = ok ? 'PASS' : 'FAIL'
+    console.log(
+      `[${status}] ${pt.name} -> verdict=${proj.projectVerdict} score=${proj.projectScore}/100 (${proj.elapsedMs} ms)`
+    )
+    if (verbose || !ok) {
+      console.log(formatProjectReportText(proj, lang, verbose, useColor))
+    }
+  }
+
+  console.log(`\nSelf-test summary: ${passed}/${total} passed.`)
+  return passed === total ? 0 : 1
 }

@@ -1,4 +1,11 @@
-import type { AnalysisReport, FindingSeverity, OutputLang, Verdict } from './types.ts'
+import type {
+  AnalysisReport,
+  FindingSeverity,
+  OutputLang,
+  ProjectAuditReport,
+  ProjectVerdict,
+  Verdict
+} from './types.ts'
 
 interface AnsiPalette {
   reset: string
@@ -286,6 +293,154 @@ export function formatReportsJson(reports: AnalysisReport[]): string {
     `  "tool": "ailoopchecker",\n` +
     `  "version": "1.0.0",\n` +
     `  "count": ${reports.length},\n` +
+    `  "reports": ${reportsJson}\n` +
+    `}`
+  )
+}
+
+function projectVerdictLabel(verdict: ProjectVerdict, lang: OutputLang): string {
+  if (lang === 'en') {
+    if (verdict === 'AI_LOOP_CONFIRMED') return 'AI-LOOP PROJECT CONFIRMED'
+    if (verdict === 'AI_LOOP_LIKELY') return 'LIKELY AI-LOOP PROJECT'
+    if (verdict === 'MIXED_AI_ASSISTED') return 'MIXED / AI-ASSISTED PROJECT'
+    return 'ORGANIC / AUTHENTIC PROJECT'
+  }
+  if (verdict === 'AI_LOOP_CONFIRMED') return 'KESİN AI-LOOP PROJESİ'
+  if (verdict === 'AI_LOOP_LIKELY') return 'YÜKSEK AI-LOOP OLASILIĞI'
+  if (verdict === 'MIXED_AI_ASSISTED') return 'KARMA / AI DESTEKLİ PROJE'
+  return 'ORGANİK / OTANTİK PROJE'
+}
+
+function projectVerdictColor(verdict: ProjectVerdict, c: AnsiPalette): string {
+  if (verdict === 'AI_LOOP_CONFIRMED') return c.red
+  if (verdict === 'AI_LOOP_LIKELY') return c.yellow
+  if (verdict === 'ORGANIC_PROJECT') return c.green
+  return c.cyan
+}
+
+export function formatProjectReportText(
+  project: ProjectAuditReport,
+  lang: OutputLang,
+  verbose: boolean,
+  useColor: boolean
+): string {
+  const c = getPalette(useColor)
+  const lines: string[] = []
+  const thick = `${c.bold}════════════════════════════════════════════════════════════════${c.reset}`
+  const vColor = projectVerdictColor(project.projectVerdict, c)
+  const vLabel = projectVerdictLabel(project.projectVerdict, lang)
+
+  lines.push(thick)
+  lines.push(
+    `${c.bold}${lang === 'tr' ? 'PROJE AI-LOOP DENETİM RAPORU' : 'PROJECT AI-LOOP AUDIT REPORT'}${c.reset} · ${c.cyan}${project.projectName}${c.reset}`
+  )
+  lines.push(
+    `  ${lang === 'tr' ? 'Proje Kararı' : 'Project Verdict'} : ${vColor}${c.bold}${vLabel}${c.reset} (${lang === 'tr' ? 'Güven' : 'Confidence'}: %${project.confidence})`
+  )
+  lines.push(
+    `  ${lang === 'tr' ? 'AI-Loop Skoru' : 'AI-Loop Score'}   : ${renderBar(project.projectScore, c, vColor)}`
+  )
+  lines.push(
+    `  ${lang === 'tr' ? 'Dosya Dağılımı' : 'File Breakdown'}  : ${project.analyzedFiles}/${project.totalFiles} · AI=${project.aiFiles} (%${project.aiRatioPercent}) · ${lang === 'tr' ? 'Doğal' : 'Authentic'}=${project.authenticFiles} · ${lang === 'tr' ? 'Belirsiz' : 'Inconclusive'}=${project.inconclusiveFiles} · ${project.elapsedMs} ms`
+  )
+  lines.push(
+    `  ${lang === 'tr' ? 'Çapraz Tekrar' : 'Cross-File Dup'}  : %${project.crossFileDuplicationPercent} · ${lang === 'tr' ? 'Ort. Dosya Skoru' : 'Avg File Score'}: ${project.averageFileAiScore}/100`
+  )
+  if (project.modalitiesWithAi.length > 0) {
+    lines.push(
+      `  ${lang === 'tr' ? 'AI Katmanları' : 'AI Modalities'}   : ${c.magenta}${project.modalitiesWithAi.join(', ')}${c.reset}`
+    )
+  }
+
+  if (project.findings.length > 0) {
+    lines.push('')
+    lines.push(
+      `  ${c.bold}${lang === 'tr' ? 'Proje Düzeyi Bulgular' : 'Project-Level Findings'} (${project.findings.length}):${c.reset}`
+    )
+    for (let i = 0; i < project.findings.length; i++) {
+      const f = project.findings[i]!
+      const tag = lang === 'tr' ? severityTag(f.severity, c) : severityTagEn(f.severity, c)
+      const deltaStr = f.scoreDelta >= 0 ? `+${f.scoreDelta}` : `${f.scoreDelta}`
+      const title = lang === 'tr' ? f.titleTr : f.titleEn
+      const detail = lang === 'tr' ? f.detailTr : f.detailEn
+      lines.push(`    ${tag} ${title} ${c.dim}(${deltaStr})${c.reset}`)
+      if (verbose) {
+        lines.push(`      ${c.dim}${detail}${c.reset}`)
+        if (f.evidence.length > 0) lines.push(`      ${c.gray}↳ ${f.evidence}${c.reset}`)
+      }
+    }
+  }
+
+  lines.push('')
+  lines.push(
+    `  ${c.bold}${lang === 'tr' ? 'Dosya Özeti' : 'Per-File Summary'}:${c.reset}`
+  )
+  for (let i = 0; i < project.reports.length; i++) {
+    const r = project.reports[i]!
+    const vc = verdictColor(r.verdict, c)
+    lines.push(
+      `    - ${r.filePath} [${r.mediaCategory}/${r.detectedFormat}] -> ${vc}${r.verdict}${c.reset} (${r.aiScore}/100)`
+    )
+  }
+
+  if (verbose) {
+    lines.push('')
+    for (let i = 0; i < project.reports.length; i++) {
+      lines.push(formatReportText(project.reports[i]!, lang, true, useColor))
+    }
+  }
+
+  return lines.join('\n')
+}
+
+export function formatProjectReportJson(project: ProjectAuditReport): string {
+  const findingLines: string[] = []
+  for (let i = 0; i < project.findings.length; i++) {
+    const f = project.findings[i]!
+    const comma = i + 1 < project.findings.length ? ',' : ''
+    findingLines.push(
+      `    {\n` +
+        `      "id": ${jsonString(f.id)},\n` +
+        `      "category": ${jsonString(f.category)},\n` +
+        `      "severity": ${jsonString(f.severity)},\n` +
+        `      "scoreDelta": ${f.scoreDelta},\n` +
+        `      "titleTr": ${jsonString(f.titleTr)},\n` +
+        `      "titleEn": ${jsonString(f.titleEn)},\n` +
+        `      "detailTr": ${jsonString(f.detailTr)},\n` +
+        `      "detailEn": ${jsonString(f.detailEn)},\n` +
+        `      "evidence": ${jsonString(f.evidence)}\n` +
+        `    }${comma}`
+    )
+  }
+  const findingsJson = findingLines.length === 0 ? '[]' : `[\n${findingLines.join('\n')}\n  ]`
+
+  const reportParts: string[] = []
+  for (let i = 0; i < project.reports.length; i++) {
+    reportParts.push(serializeReport(project.reports[i]!))
+  }
+  const reportsJson = reportParts.length === 0 ? '[]' : `[\n${reportParts.join(',\n')}\n  ]`
+
+  return (
+    `{\n` +
+    `  "tool": "ailoopchecker",\n` +
+    `  "version": "1.0.0",\n` +
+    `  "mode": "project",\n` +
+    `  "projectName": ${jsonString(project.projectName)},\n` +
+    `  "totalFiles": ${project.totalFiles},\n` +
+    `  "analyzedFiles": ${project.analyzedFiles},\n` +
+    `  "errorFiles": ${project.errorFiles},\n` +
+    `  "aiFiles": ${project.aiFiles},\n` +
+    `  "authenticFiles": ${project.authenticFiles},\n` +
+    `  "inconclusiveFiles": ${project.inconclusiveFiles},\n` +
+    `  "aiRatioPercent": ${project.aiRatioPercent},\n` +
+    `  "averageFileAiScore": ${project.averageFileAiScore},\n` +
+    `  "crossFileDuplicationPercent": ${project.crossFileDuplicationPercent},\n` +
+    `  "modalitiesWithAi": ${serializeStringArray(project.modalitiesWithAi)},\n` +
+    `  "projectScore": ${project.projectScore},\n` +
+    `  "confidence": ${project.confidence},\n` +
+    `  "projectVerdict": ${jsonString(project.projectVerdict)},\n` +
+    `  "elapsedMs": ${project.elapsedMs},\n` +
+    `  "findings": ${findingsJson},\n` +
     `  "reports": ${reportsJson}\n` +
     `}`
   )
