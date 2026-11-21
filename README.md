@@ -25,7 +25,27 @@
 - **Metin / Ürün İçeriği Tespiti (`TXT`, `MD`, `HTML`, `JSON`):**
   - Türkçe & İngilizce LLM kalıp ifade yoğunluğu, cümle uzunluğu değişkenliği (*burstiness*) ve şablon biçimlendirme analizi
 
-## Derleme ve Çalıştırma
+## Kurulum ve Kullanım
+
+### npm üzerinden kullanım (Node.js 22+)
+
+```bash
+# Tek seferlik çalıştırma (dosya veya tüm proje klasörü)
+npx ailoopchecker urun.png video.mp4 ses.wav
+npx ailoopchecker ./proje-dizini
+
+# Global kurulum
+npm install -g ailoopchecker
+ailoopchecker ./proje-dizini --strict --json
+```
+
+```ts
+// JS/TS projelerinde SDK olarak kullanım
+import { analyzeFile, analyzeBuffer, auditProjectFiles } from 'ailoopchecker'
+
+const report = await analyzeFile('./src/service.ts', 60)
+console.log(report.verdict, report.aiScore)
+```
 
 ### Native `geatsc` ikili dosyasını derleme
 
